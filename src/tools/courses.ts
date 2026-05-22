@@ -1,0 +1,42 @@
+import { z } from "zod";
+import { CanvasClient } from "../canvasClient.js";
+import { fetchAllPages } from "../pagination.js";
+
+interface CanvasCourse {
+  id: number;
+  name: string;
+  course_code: string;
+  enrollment_term_id: number;
+  workflow_state: string;
+}
+
+export const listCoursesSchema = z.object({});
+
+export async function listCourses(client: CanvasClient): Promise<string> {
+  const courses = await fetchAllPages<CanvasCourse>(client, "/api/v1/courses", {
+    enrollment_state: "active",
+  });
+
+  if (courses.length === 0) {
+    return "Je hebt momenteel geen actieve Canvas cursussen.";
+  }
+
+  const lines = courses.map(
+    (c) => `- [${c.id}] ${c.name} (${c.course_code})`
+  );
+  return `Jouw actieve Canvas cursussen (${courses.length}):\n\n${lines.join("\n")}`;
+}
+
+export const courseTools = [
+  {
+    name: "canvas_list_courses",
+    description:
+      "Haal een lijst op van alle actieve Canvas cursussen waarvoor je ingeschreven bent. Gebruik dit als startpunt om een courseId te vinden voor andere tools.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+    handler: (client: CanvasClient) => listCourses(client),
+  },
+];
