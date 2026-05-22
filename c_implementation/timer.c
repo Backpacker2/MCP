@@ -45,6 +45,16 @@ void timer_format_time(time_t t, char *buf, size_t buf_len)
      *   tm_min   (0-59)
      *   tm_sec   (0-60, inclusief schrikkelseconde)
      */
+    if (buf == NULL || buf_len == 0) return;
+
+    /*
+     * Defensief: altijd null-termineren vóór strftime().
+     * De C-standaard zegt dat de buffer "unspecified" is als strftime()
+     * 0 teruggeeft (buffer te klein). Door vooraf te null-termineren
+     * garanderen we een geldige lege string ook bij kleine buffers.
+     */
+    buf[0] = '\0';
+
     struct tm tm_local;
     localtime_r(&t, &tm_local);
 

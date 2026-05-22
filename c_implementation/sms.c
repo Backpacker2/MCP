@@ -172,7 +172,15 @@ int sms_find_serial_device(char *device_buf, size_t buf_len)
      * We proberen ze één voor één totdat we er een vinden die bestaat.
      *
      * stat() geeft informatie over een bestand. Als het slaagt, bestaat het.
+     *
+     * BUG GEVONDEN IN TEST: Buffer werd niet geïnitialiseerd als er geen
+     * apparaat gevonden werd. Aanroeper kon een willekeurige waarde lezen.
+     * Fix: altijd null-termineren bij buf_len > 0.
      */
+    if (device_buf != NULL && buf_len > 0) {
+        device_buf[0] = '\0';
+    }
+
     const char *kandidaten[] = {
         "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyUSB2",
         "/dev/ttyACM0", "/dev/ttyACM1",
