@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  claude-monitor:
+    build:
+      context: ../recommended-solution
+      dockerfile: ../automation/Dockerfile
+    container_name: claude-monitor
+    restart: unless-stopped
+
+    environment:
+      - NOTIFICATION_PROVIDER=${NOTIFICATION_PROVIDER:-pushover}
+      - PUSHOVER_TOKEN=${PUSHOVER_TOKEN}
+      - PUSHOVER_USER=${PUSHOVER_USER}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - TEXTBEE_API_KEY=${TEXTBEE_API_KEY}
+      - TEXTBEE_DEVICE_ID=${TEXTBEE_DEVICE_ID}
+      - TEXTBEE_RECIPIENT=${TEXTBEE_RECIPIENT}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_FROM=${TWILIO_FROM}
+      - TWILIO_TO=${TWILIO_TO}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-600}
+
+    volumes:
+      # Persistente opslag voor sessie en state
+      - claude_monitor_data:/app/data
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Geen netwerk-poorten nodig (outbound-only)
+    network_mode: bridge
+
+volumes:
+  claude_monitor_data:
+    driver: local
+
+# ──────────────────────────────────────────────────────
+# Gebruik:
+#
+# Setup (eenmalig, browser opent NIET in container!):
+#   Voer setup eerst lokaal uit:
+#     cd recommended-solution
+#     python claude_monitor.py --setup
+#     cp session.json ../automation/data/
+#
+# Starten:
+#   docker-compose up -d
+#
+# Logs bekijken:
+#   docker-compose logs -f
+#
+# Stoppen:
+#   docker-compose down
+# ──────────────────────────────────────────────────────
