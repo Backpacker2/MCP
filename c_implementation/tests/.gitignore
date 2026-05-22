@@ -1,1 +1,4 @@
-test_timer\ntest_sms\ntest_integration\n*.o
+test_timer
+test_sms
+test_integration
+*.o
