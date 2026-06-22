@@ -2,6 +2,7 @@ import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
+import { sanitizeText } from "../utils/sanitizeText.js";
 
 interface CanvasAnnouncement {
   id: number;
@@ -24,10 +25,12 @@ export async function getAnnouncements(client: CanvasClient, courseId: string): 
 
   const lines = announcements.map((a) => {
     const date = formatDate(a.posted_at);
-    const author = a.author?.display_name ?? "Onbekend";
-    const message = cleanHtml(a.message).slice(0, 300);
-    const truncated = cleanHtml(a.message).length > 300 ? "…" : "";
-    return `**${a.title}**\nGeplaatst: ${date} door ${author}\n${message}${truncated}`;
+    const author = sanitizeText(a.author?.display_name ?? "Onbekend", 100);
+    const title = sanitizeText(a.title, 200);
+    const cleaned = cleanHtml(a.message);
+    const message = cleaned.slice(0, 300);
+    const truncated = cleaned.length > 300 ? "…" : "";
+    return `**${title}**\nGeplaatst: ${date} door ${author}\n${message}${truncated}`;
   });
 
   return `Mededelingen voor cursus ${courseId} (${announcements.length}):\n\n${lines.join("\n\n---\n\n")}`;

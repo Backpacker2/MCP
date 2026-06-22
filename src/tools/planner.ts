@@ -1,6 +1,7 @@
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
+import { sanitizeText } from "../utils/sanitizeText.js";
 
 interface PlannerItem {
   plannable_type: string;
@@ -36,9 +37,10 @@ export async function getUpcomingDeadlines(client: CanvasClient): Promise<string
 
   const lines = sorted.map((item) => {
     const date = formatDate(item.plannable_date);
-    const course = item.context_name ? ` — ${item.context_name}` : "";
+    const course = item.context_name ? ` — ${sanitizeText(item.context_name, 200)}` : "";
+    const title = sanitizeText(item.plannable.title, 200);
     const submitted = item.submissions?.submitted ? " ✓ ingeleverd" : "";
-    return `- ${date}${course}: ${item.plannable.title}${submitted}`;
+    return `- ${date}${course}: ${title}${submitted}`;
   });
 
   return `Aankomende deadlines (${sorted.length}):\n\n${lines.join("\n")}`;

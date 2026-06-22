@@ -1,6 +1,7 @@
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
+import { sanitizeText } from "../utils/sanitizeText.js";
 
 interface SubmissionComment {
   author_name: string;
@@ -48,7 +49,7 @@ export async function listSubmissions(client: CanvasClient, courseId: string): P
   }
 
   const lines = relevant.map((s) => {
-    const name = s.assignment?.name ?? `Opdracht ${s.assignment_id}`;
+    const name = sanitizeText(s.assignment?.name ?? `Opdracht ${s.assignment_id}`, 200);
     const state = stateLabel[s.workflow_state] ?? s.workflow_state;
     const grade = s.grade !== null ? ` | Cijfer: ${s.grade}` : "";
     const score =
@@ -93,7 +94,9 @@ export async function getSubmission(
     lines.push("", "Feedback:");
     for (const c of comments) {
       const date = formatDate(c.created_at);
-      lines.push(`  [${date}] ${c.author_name}: ${c.comment}`);
+      const author = sanitizeText(c.author_name, 100);
+      const comment = sanitizeText(c.comment, 1000);
+      lines.push(`  [${date}] ${author}: ${comment}`);
     }
   } else {
     lines.push("", "Geen feedbackopmerkingen.");

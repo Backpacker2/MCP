@@ -1,6 +1,7 @@
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
+import { sanitizeText } from "../utils/sanitizeText.js";
 
 interface CanvasFile {
   id: number;
@@ -33,7 +34,9 @@ export async function listFiles(client: CanvasClient, courseId: string): Promise
   const lines = files.map((f) => {
     const size = formatBytes(f.size);
     const updated = formatDate(f.updated_at);
-    return `- [${f.id}] ${f.display_name} (${f["content-type"]}, ${size}, bijgewerkt: ${updated})`;
+    const name = sanitizeText(f.display_name, 200);
+    const contentType = sanitizeText(f["content-type"], 100);
+    return `- [${f.id}] ${name} (${contentType}, ${size}, bijgewerkt: ${updated})`;
   });
 
   return `Bestanden voor cursus ${courseId} (${files.length}):\n\n${lines.join("\n")}`;
