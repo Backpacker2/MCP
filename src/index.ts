@@ -13,6 +13,8 @@ import { plannerTools } from "./tools/planner.js";
 import { announcementTools } from "./tools/announcements.js";
 import { moduleTools } from "./tools/modules.js";
 import { pageTools } from "./tools/pages.js";
+import { fileTools } from "./tools/files.js";
+import { submissionTools } from "./tools/submissions.js";
 
 const config = loadConfig();
 const client = new CanvasClient({
@@ -27,6 +29,8 @@ const allTools = [
   ...announcementTools,
   ...moduleTools,
   ...pageTools,
+  ...fileTools,
+  ...submissionTools,
 ];
 
 const server = new Server(
