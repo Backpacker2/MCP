@@ -10,6 +10,8 @@ function parseNextUrl(linkHeader: string | null): string | null {
   return null;
 }
 
+const MAX_PAGES = 50;
+
 export async function fetchAllPages<T>(
   client: CanvasClient,
   path: string,
@@ -21,8 +23,10 @@ export async function fetchAllPages<T>(
     per_page: 100,
     ...params,
   };
+  let pageCount = 0;
 
-  while (currentPath) {
+  while (currentPath && pageCount < MAX_PAGES) {
+    pageCount++;
     const { data, linkHeader } = await client.getWithHeaders<T[]>(
       currentPath,
       currentParams
@@ -38,6 +42,10 @@ export async function fetchAllPages<T>(
     } else {
       currentPath = null;
     }
+  }
+
+  if (pageCount >= MAX_PAGES && currentPath) {
+    process.stderr.write(`[Canvas] Paginering gestopt na ${MAX_PAGES} pagina's voor ${path}.\n`);
   }
 
   return results;

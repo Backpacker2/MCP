@@ -158,4 +158,18 @@ describe("fetchAllPages", () => {
     expect(secondCall[0]).toMatch(/^\/api\/v1\/courses/);
     expect(secondCall[0]).not.toContain("https://");
   });
+
+  it("stopt na MAX_PAGES pagina's om onbegrensd geheugengebruik te voorkomen", async () => {
+    // Elke aanroep retourneert een next-link zodat de loop normaal nooit zou stoppen.
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({
+      data: [{ id: 1 }],
+      linkHeader: '<https://school.example.com/api/v1/courses?page=2>; rel="next"',
+    });
+
+    const result = await fetchAllPages(mockClient, "/api/v1/courses");
+
+    // Moet stoppen bij 50 pagina's (MAX_PAGES)
+    expect((mockClient.getWithHeaders as jest.Mock).mock.calls.length).toBe(50);
+    expect(result).toHaveLength(50);
+  });
 });
