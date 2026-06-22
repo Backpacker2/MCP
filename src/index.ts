@@ -15,6 +15,7 @@ import { moduleTools } from "./tools/modules.js";
 import { pageTools } from "./tools/pages.js";
 import { fileTools } from "./tools/files.js";
 import { submissionTools } from "./tools/submissions.js";
+import { validateArgs } from "./utils/validateArgs.js";
 
 const config = loadConfig();
 const client = new CanvasClient({
@@ -55,6 +56,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       content: [{ type: "text", text: `Onbekende tool: ${name}` }],
       isError: true,
     };
+  }
+
+  const validationError = validateArgs((args ?? {}) as Record<string, unknown>);
+  if (validationError) {
+    return { content: [{ type: "text", text: validationError }], isError: true };
   }
 
   try {
