@@ -386,9 +386,17 @@ describe("listPages", () => {
     expect(result).toContain("Geen pagina's gevonden");
   });
 
-  it("gooit CanvasApiError bij 404", async () => {
+  it("geeft begrijpelijke melding bij 404 (pagina's uitgeschakeld in cursus)", async () => {
     (mockClient.getWithHeaders as jest.Mock).mockRejectedValue(new CanvasApiError(404, "Niet gevonden."));
-    await expect(listPages(mockClient, "99999")).rejects.toThrow(CanvasApiError);
+    const result = await listPages(mockClient, "15807");
+    expect(result).toContain("niet beschikbaar");
+    expect(result).toContain("15807");
+    expect(result).not.toContain("404");
+  });
+
+  it("gooit CanvasApiError door bij andere fouten (bijv. 401)", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockRejectedValue(new CanvasApiError(401, "Ongeldig token."));
+    await expect(listPages(mockClient, "1")).rejects.toThrow(CanvasApiError);
   });
 });
 
@@ -418,12 +426,16 @@ describe("getPageContent", () => {
     expect(result).toContain("Geen inhoud beschikbaar");
   });
 
-  it("gooit CanvasApiError bij 404 (pagina bestaat niet)", async () => {
+  it("geeft begrijpelijke melding bij 404 (pagina bestaat niet)", async () => {
     (mockClient.get as jest.Mock).mockRejectedValue(new CanvasApiError(404, "Niet gevonden."));
-    await expect(getPageContent(mockClient, "1", "bestaat-niet")).rejects.toThrow(CanvasApiError);
+    const result = await getPageContent(mockClient, "1", "bestaat-niet");
+    expect(result).toContain("bestaat-niet");
+    expect(result).toContain("bestaat niet");
+    expect(result).toContain("canvas_list_pages");
+    expect(result).not.toContain("404");
   });
 
-  it("gooit CanvasApiError bij 403", async () => {
+  it("gooit CanvasApiError door bij 403", async () => {
     (mockClient.get as jest.Mock).mockRejectedValue(new CanvasApiError(403, "Geen toegang."));
     await expect(getPageContent(mockClient, "1", "pagina")).rejects.toThrow(CanvasApiError);
   });
@@ -556,12 +568,20 @@ describe("listFiles", () => {
     expect(result).toContain("Geen bestanden gevonden");
   });
 
-  it("gooit CanvasApiError bij 404", async () => {
+  it("geeft begrijpelijke melding bij 403 (student-token heeft geen bestandsrechten)", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockRejectedValue(new CanvasApiError(403, "Geen toegang."));
+    const result = await listFiles(mockClient, "1");
+    expect(result).toContain("niet beschikbaar");
+    expect(result.toLowerCase()).toContain("student");
+    expect(result).not.toContain("403");
+  });
+
+  it("gooit CanvasApiError door bij 404", async () => {
     (mockClient.getWithHeaders as jest.Mock).mockRejectedValue(new CanvasApiError(404, "Niet gevonden."));
     await expect(listFiles(mockClient, "99999")).rejects.toThrow(CanvasApiError);
   });
 
-  it("gooit CanvasApiError bij 401", async () => {
+  it("gooit CanvasApiError door bij 401", async () => {
     (mockClient.getWithHeaders as jest.Mock).mockRejectedValue(new CanvasApiError(401, "Ongeldige token."));
     await expect(listFiles(mockClient, "1")).rejects.toThrow(CanvasApiError);
   });

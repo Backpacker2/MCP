@@ -2,6 +2,7 @@ import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
+import { CanvasApiError } from "../errors.js";
 
 interface CanvasPage {
   url: string;
@@ -21,11 +22,19 @@ interface CanvasPageDetail {
 }
 
 export async function listPages(client: CanvasClient, courseId: string): Promise<string> {
-  const pages = await fetchAllPages<CanvasPage>(
-    client,
-    `/api/v1/courses/${courseId}/pages`,
-    { sort: "updated_at", order: "desc" }
-  );
+  let pages: CanvasPage[];
+  try {
+    pages = await fetchAllPages<CanvasPage>(
+      client,
+      `/api/v1/courses/${courseId}/pages`,
+      { sort: "updated_at", order: "desc" }
+    );
+  } catch (error) {
+    if (error instanceof CanvasApiError && error.statusCode === 404) {
+      return `Pagina's zijn niet beschikbaar voor cursus ${courseId}. Mogelijk zijn pagina's uitgeschakeld in deze cursus, of is het cursus-ID onjuist.`;
+    }
+    throw error;
+  }
 
   if (pages.length === 0) {
     return `Geen pagina's gevonden voor cursus ${courseId}.`;
@@ -48,9 +57,17 @@ export async function getPageContent(
   courseId: string,
   pageUrl: string
 ): Promise<string> {
-  const page = await client.get<CanvasPageDetail>(
-    `/api/v1/courses/${courseId}/pages/${pageUrl}`
-  );
+  let page: CanvasPageDetail;
+  try {
+    page = await client.get<CanvasPageDetail>(
+      `/api/v1/courses/${courseId}/pages/${pageUrl}`
+    );
+  } catch (error) {
+    if (error instanceof CanvasApiError && error.statusCode === 404) {
+      return `Pagina '${pageUrl}' bestaat niet in cursus ${courseId}. Gebruik canvas_list_pages om de beschikbare pagina's op te vragen.`;
+    }
+    throw error;
+  }
 
   const updated = formatDate(page.updated_at);
   const body = cleanHtml(page.body) || "Geen inhoud beschikbaar op deze pagina.";

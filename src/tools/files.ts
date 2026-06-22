@@ -2,6 +2,7 @@ import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
 import { sanitizeText } from "../utils/sanitizeText.js";
+import { CanvasApiError } from "../errors.js";
 
 interface CanvasFile {
   id: number;
@@ -21,11 +22,19 @@ function formatBytes(bytes: number): string {
 }
 
 export async function listFiles(client: CanvasClient, courseId: string): Promise<string> {
-  const files = await fetchAllPages<CanvasFile>(
-    client,
-    `/api/v1/courses/${courseId}/files`,
-    { sort: "updated_at", order: "desc" }
-  );
+  let files: CanvasFile[];
+  try {
+    files = await fetchAllPages<CanvasFile>(
+      client,
+      `/api/v1/courses/${courseId}/files`,
+      { sort: "updated_at", order: "desc" }
+    );
+  } catch (error) {
+    if (error instanceof CanvasApiError && error.statusCode === 403) {
+      return `Bestanden zijn niet beschikbaar voor cursus ${courseId}. Student-tokens hebben op deze Canvas-omgeving geen toegang tot het bestandsoverzicht. Vraag je docent om bestanden via een andere manier te delen.`;
+    }
+    throw error;
+  }
 
   if (files.length === 0) {
     return `Geen bestanden gevonden voor cursus ${courseId}.`;
