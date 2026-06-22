@@ -2,6 +2,7 @@ import { CanvasClient } from "../src/canvasClient";
 import { listCourses } from "../src/tools/courses";
 import { listAssignments, getAssignmentDetails } from "../src/tools/assignments";
 import { getUpcomingDeadlines } from "../src/tools/planner";
+import { getPageContent } from "../src/tools/pages";
 
 const mockClient = {
   get: jest.fn(),
@@ -78,6 +79,43 @@ describe("getAssignmentDetails", () => {
     expect(result).toContain("Portfolio opdracht");
     expect(result).toContain("Lever een portfolio in");
     expect(result).toContain("20 punten");
+  });
+});
+
+describe("getPageContent", () => {
+  it("toont paginatitel en schone inhoud", async () => {
+    // We mocken client.get — canvas geeft een object terug (geen array), dus geen getWithHeaders nodig.
+    (mockClient.get as jest.Mock).mockResolvedValue({
+      url: "weekplanning",
+      title: "Weekplanning",
+      body: "<p>Week 1: <strong>Introductie</strong></p>",
+      updated_at: "2025-09-01T10:00:00Z",
+      published: true,
+    });
+
+    const result = await getPageContent(mockClient, "42", "weekplanning");
+
+    // De titel moet zichtbaar zijn
+    expect(result).toContain("Weekplanning");
+    // HTML-tags moeten verwijderd zijn door cleanHtml()
+    expect(result).toContain("Introductie");
+    expect(result).not.toContain("<p>");
+    expect(result).not.toContain("<strong>");
+  });
+
+  it("geeft nette melding als de pagina geen body heeft", async () => {
+    (mockClient.get as jest.Mock).mockResolvedValue({
+      url: "lege-pagina",
+      title: "Lege pagina",
+      body: null, // Canvas stuurt soms null als de pagina leeg is
+      updated_at: "2025-09-01T10:00:00Z",
+      published: true,
+    });
+
+    const result = await getPageContent(mockClient, "42", "lege-pagina");
+
+    expect(result).toContain("Lege pagina");
+    expect(result).toContain("Geen inhoud beschikbaar");
   });
 });
 
