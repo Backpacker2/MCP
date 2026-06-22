@@ -1,4 +1,5 @@
 import { CanvasClient } from "./canvasClient.js";
+import { CanvasApiError } from "./errors.js";
 
 function parseNextUrl(linkHeader: string | null): string | null {
   if (!linkHeader) return null;
@@ -8,6 +9,20 @@ function parseNextUrl(linkHeader: string | null): string | null {
     if (match) return match[1];
   }
   return null;
+}
+
+function validatePaginationUrl(nextUrl: string, baseUrl: string): string {
+  const next = new URL(nextUrl);
+  const base = new URL(baseUrl);
+
+  if (next.hostname !== base.hostname) {
+    throw new CanvasApiError(0, "Paginering-URL wijst naar een onbekende host — verzoek geweigerd.");
+  }
+  if (!next.pathname.startsWith("/api/v1/")) {
+    throw new CanvasApiError(0, "Paginering-URL heeft een onverwacht pad — verzoek geweigerd.");
+  }
+
+  return next.pathname + next.search;
 }
 
 export async function fetchAllPages<T>(
@@ -31,10 +46,8 @@ export async function fetchAllPages<T>(
 
     const nextUrl = parseNextUrl(linkHeader);
     if (nextUrl) {
-      // Canvas geeft een volledige URL terug; we extraheren alleen het pad + query
-      const url = new URL(nextUrl);
-      currentPath = url.pathname + url.search;
-      currentParams = undefined; // params zitten al in de URL
+      currentPath = validatePaginationUrl(nextUrl, client.baseUrl);
+      currentParams = undefined;
     } else {
       currentPath = null;
     }
