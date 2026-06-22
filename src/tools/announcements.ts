@@ -1,7 +1,14 @@
+import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
+
+const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
+
+const getAnnouncementsSchema = z.object({
+  courseId: idParam.describe("Het Canvas course ID."),
+});
 
 interface CanvasAnnouncement {
   id: number;
@@ -48,6 +55,7 @@ export const announcementTools = [
       },
       required: ["courseId"],
     },
+    schema: getAnnouncementsSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       getAnnouncements(client, args.courseId),
   },

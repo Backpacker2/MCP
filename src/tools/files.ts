@@ -1,6 +1,10 @@
+import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
+
+const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
+const listFilesSchema = z.object({ courseId: idParam });
 
 interface CanvasFile {
   id: number;
@@ -54,6 +58,7 @@ export const fileTools = [
       },
       required: ["courseId"],
     },
+    schema: listFilesSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       listFiles(client, args.courseId),
   },

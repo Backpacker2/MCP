@@ -1,6 +1,11 @@
+import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
+
+const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
+const listSubmissionsSchema = z.object({ courseId: idParam });
+const getSubmissionSchema = z.object({ courseId: idParam, assignmentId: idParam });
 
 interface SubmissionComment {
   author_name: string;
@@ -117,6 +122,7 @@ export const submissionTools = [
       },
       required: ["courseId"],
     },
+    schema: listSubmissionsSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       listSubmissions(client, args.courseId),
   },
@@ -138,6 +144,7 @@ export const submissionTools = [
       },
       required: ["courseId", "assignmentId"],
     },
+    schema: getSubmissionSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       getSubmission(client, args.courseId, args.assignmentId),
   },

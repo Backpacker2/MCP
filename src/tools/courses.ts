@@ -37,6 +37,7 @@ export const courseTools = [
       properties: {},
       required: [],
     },
+    schema: listCoursesSchema,
     handler: (client: CanvasClient) => listCourses(client),
   },
 ];

@@ -1,7 +1,13 @@
+import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
+
+
+const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
+const listPagesSchema = z.object({ courseId: idParam });
+const getPageContentSchema = z.object({ courseId: idParam, pageUrl: z.string().min(1, "pageUrl mag niet leeg zijn") });
 
 interface CanvasPage {
   url: string;
@@ -80,6 +86,7 @@ export const pageTools = [
       },
       required: ["courseId"],
     },
+    schema: listPagesSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       listPages(client, args.courseId),
   },
@@ -101,6 +108,7 @@ export const pageTools = [
       },
       required: ["courseId", "pageUrl"],
     },
+    schema: getPageContentSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       getPageContent(client, args.courseId, args.pageUrl),
   },

@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -5,8 +6,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { ZodError } from "zod";
 import { loadConfig } from "./config.js";
 import { CanvasClient } from "./canvasClient.js";
+import { CanvasApiError, CanvasConfigError } from "./errors.js";
 import { courseTools } from "./tools/courses.js";
 import { assignmentTools } from "./tools/assignments.js";
 import { plannerTools } from "./tools/planner.js";
@@ -15,6 +18,10 @@ import { moduleTools } from "./tools/modules.js";
 import { pageTools } from "./tools/pages.js";
 import { fileTools } from "./tools/files.js";
 import { submissionTools } from "./tools/submissions.js";
+import { calendarTools } from "./tools/calendar.js";
+import { discussionTools } from "./tools/discussions.js";
+import { inboxTools } from "./tools/inbox.js";
+import { eportfolioTools } from "./tools/eportfolio.js";
 
 const config = loadConfig();
 const client = new CanvasClient({
@@ -31,6 +38,10 @@ const allTools = [
   ...pageTools,
   ...fileTools,
   ...submissionTools,
+  ...calendarTools,
+  ...discussionTools,
+  ...inboxTools,
+  ...eportfolioTools,
 ];
 
 const server = new Server(
@@ -58,12 +69,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   try {
-    const result = await tool.handler(client, (args ?? {}) as Record<string, string>);
+    const parsed = tool.schema.parse(args ?? {});
+    const result = await tool.handler(client, parsed as Record<string, string>);
     return { content: [{ type: "text", text: result }] };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Onbekende fout";
+    if (error instanceof ZodError) {
+      const details = error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ");
+      return {
+        content: [{ type: "text", text: `Ongeldige invoer voor ${name}: ${details}` }],
+        isError: true,
+      };
+    }
+    if (error instanceof CanvasApiError || error instanceof CanvasConfigError) {
+      return {
+        content: [{ type: "text", text: error.message }],
+        isError: true,
+      };
+    }
+    process.stderr.write(`[canvas-claude-mcp] Onverwachte fout in ${name}: ${error}\n`);
     return {
-      content: [{ type: "text", text: `Fout bij uitvoeren van ${name}: ${message}` }],
+      content: [{ type: "text", text: `Er is een onverwachte fout opgetreden bij ${name}. Controleer de server logs.` }],
       isError: true,
     };
   }

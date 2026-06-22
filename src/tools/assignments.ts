@@ -15,13 +15,15 @@ interface CanvasAssignment {
   workflow_state: string;
 }
 
+const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
+
 export const listAssignmentsSchema = z.object({
-  courseId: z.string().describe("Het Canvas course ID. Gebruik canvas_list_courses om dit op te zoeken."),
+  courseId: idParam.describe("Het Canvas course ID. Gebruik canvas_list_courses om dit op te zoeken."),
 });
 
 export const getAssignmentDetailsSchema = z.object({
-  courseId: z.string().describe("Het Canvas course ID."),
-  assignmentId: z.string().describe("Het Canvas assignment ID."),
+  courseId: idParam.describe("Het Canvas course ID."),
+  assignmentId: idParam.describe("Het Canvas assignment ID."),
 });
 
 export async function listAssignments(client: CanvasClient, courseId: string): Promise<string> {
@@ -87,6 +89,7 @@ export const assignmentTools = [
       },
       required: ["courseId"],
     },
+    schema: listAssignmentsSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       listAssignments(client, args.courseId),
   },
@@ -108,6 +111,7 @@ export const assignmentTools = [
       },
       required: ["courseId", "assignmentId"],
     },
+    schema: getAssignmentDetailsSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       getAssignmentDetails(client, args.courseId, args.assignmentId),
   },

@@ -1,5 +1,10 @@
+import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
+
+const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
+const listModulesSchema = z.object({ courseId: idParam });
+const getModuleItemsSchema = z.object({ courseId: idParam, moduleId: idParam });
 
 interface CanvasModule {
   id: number;
@@ -77,6 +82,7 @@ export const moduleTools = [
       },
       required: ["courseId"],
     },
+    schema: listModulesSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       listModules(client, args.courseId),
   },
@@ -98,6 +104,7 @@ export const moduleTools = [
       },
       required: ["courseId", "moduleId"],
     },
+    schema: getModuleItemsSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       getModuleItems(client, args.courseId, args.moduleId),
   },

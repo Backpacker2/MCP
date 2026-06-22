@@ -1,6 +1,9 @@
+import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
+
+const getUpcomingDeadlinesSchema = z.object({});
 
 interface PlannerItem {
   plannable_type: string;
@@ -54,6 +57,7 @@ export const plannerTools = [
       properties: {},
       required: [],
     },
+    schema: getUpcomingDeadlinesSchema,
     handler: (client: CanvasClient) => getUpcomingDeadlines(client),
   },
 ];
