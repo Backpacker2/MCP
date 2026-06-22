@@ -6,10 +6,15 @@ import { getPageContent } from "../src/tools/pages";
 import { getModuleItems } from "../src/tools/modules";
 import { listFiles } from "../src/tools/files";
 import { listSubmissions, getSubmission } from "../src/tools/submissions";
+import { getCalendarEvents } from "../src/tools/calendar";
+import { listDiscussions, getDiscussionEntries } from "../src/tools/discussions";
+import { getWeekOverview, getCourseProgress, getDeadlineBurndown } from "../src/tools/reports";
 
 const mockClient = {
   get: jest.fn(),
   getWithHeaders: jest.fn(),
+  cacheGet: jest.fn().mockReturnValue(undefined),
+  cacheSet: jest.fn(),
 } as unknown as CanvasClient;
 
 beforeEach(() => jest.clearAllMocks());
@@ -32,6 +37,25 @@ describe("listCourses", () => {
     (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({ data: [], linkHeader: null });
     const result = await listCourses(mockClient);
     expect(result).toContain("geen actieve Canvas cursussen");
+  });
+
+  it("gebruikt cache bij tweede aanroep", async () => {
+    interface CanvasCourse { id: number; name: string; course_code: string; enrollment_term_id: number; workflow_state: string; }
+    let store: CanvasCourse[] | undefined;
+    const cachingClient = {
+      getWithHeaders: jest.fn().mockResolvedValue({
+        data: [{ id: 2, name: "Wiskunde", course_code: "WIS1", enrollment_term_id: 1, workflow_state: "available" }],
+        linkHeader: null,
+      }),
+      cacheGet: jest.fn().mockImplementation(() => store),
+      cacheSet: jest.fn().mockImplementation((_k: string, v: unknown) => { store = v as CanvasCourse[]; }),
+      baseUrl: "https://school.example.com",
+    } as unknown as CanvasClient;
+
+    await listCourses(cachingClient);
+    await listCourses(cachingClient);
+
+    expect(cachingClient.getWithHeaders).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -277,5 +301,240 @@ describe("getSubmission", () => {
 
     const result = await getSubmission(mockClient, "1", "99");
     expect(result).toContain("nog niet ingeleverd");
+  });
+});
+
+describe("getCalendarEvents", () => {
+  it("toont events met titel, datum en context", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({
+      data: [
+        {
+          id: 1,
+          title: "Tentamen Informatica",
+          start_at: new Date(Date.now() + 86400000 * 5).toISOString(),
+          end_at: null,
+          description: "<p>Zorg dat je op tijd bent.</p>",
+          location_name: "Zaal A1",
+          context_name: "Informatica",
+          type: "event",
+        },
+      ],
+      linkHeader: null,
+    });
+
+    const result = await getCalendarEvents(mockClient);
+    expect(result).toContain("Tentamen Informatica");
+    expect(result).toContain("Informatica");
+    expect(result).toContain("Zaal A1");
+    expect(result).toContain("Zorg dat je op tijd bent");
+    expect(result).not.toContain("<p>");
+  });
+
+  it("geeft melding als er geen events zijn", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({ data: [], linkHeader: null });
+    const result = await getCalendarEvents(mockClient);
+    expect(result).toContain("Geen kalender-events");
+  });
+
+  it("filtert op cursus als courseId opgegeven", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({ data: [], linkHeader: null });
+    const result = await getCalendarEvents(mockClient, "42");
+    expect(result).toContain("cursus 42");
+  });
+});
+
+describe("listDiscussions", () => {
+  it("toont discussieonderwerpen met type en datum", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({
+      data: [
+        {
+          id: 7,
+          title: "Vraag over het portfolio",
+          message: "<p>Wie heeft al begonnen?</p>",
+          posted_at: "2025-09-10T08:00:00Z",
+          discussion_type: "side_comment",
+          author: { display_name: "Docent Pietersen" },
+        },
+      ],
+      linkHeader: null,
+    });
+
+    const result = await listDiscussions(mockClient, "1");
+    expect(result).toContain("Vraag over het portfolio");
+    expect(result).toContain("[7]");
+    expect(result).toContain("Docent Pietersen");
+  });
+
+  it("geeft melding bij geen discussies", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({ data: [], linkHeader: null });
+    const result = await listDiscussions(mockClient, "1");
+    expect(result).toContain("Geen discussies gevonden");
+  });
+});
+
+describe("getDiscussionEntries", () => {
+  it("toont berichten met auteur en schone tekst", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({
+      data: [
+        {
+          id: 101,
+          message: "<p>Ik ben al begonnen met hoofdstuk 2.</p>",
+          user_name: "Student A",
+          created_at: "2025-09-11T10:00:00Z",
+        },
+      ],
+      linkHeader: null,
+    });
+
+    const result = await getDiscussionEntries(mockClient, "1", "7");
+    expect(result).toContain("Student A");
+    expect(result).toContain("hoofdstuk 2");
+    expect(result).not.toContain("<p>");
+  });
+
+  it("geeft melding als discussie leeg is", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({ data: [], linkHeader: null });
+    const result = await getDiscussionEntries(mockClient, "1", "7");
+    expect(result).toContain("Geen berichten gevonden");
+  });
+});
+
+describe("getWeekOverview", () => {
+  it("toont deadlines en events per dag", async () => {
+    const tomorrow = new Date(Date.now() + 86400000);
+    const tomorrowStr = tomorrow.toISOString();
+
+    (mockClient.getWithHeaders as jest.Mock)
+      .mockResolvedValueOnce({
+        data: [
+          {
+            plannable_type: "assignment",
+            plannable_date: tomorrowStr,
+            plannable: { id: 1, title: "Essay inleveren", due_at: tomorrowStr },
+            context_name: "Nederlands",
+            submissions: { submitted: false },
+          },
+        ],
+        linkHeader: null,
+      })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 5,
+            title: "Gastcollege",
+            start_at: tomorrowStr,
+            end_at: null,
+            location_name: "Zaal B2",
+            context_name: "Informatica",
+          },
+        ],
+        linkHeader: null,
+      });
+
+    const result = await getWeekOverview(mockClient);
+    expect(result).toContain("Essay inleveren");
+    expect(result).toContain("Nederlands");
+    expect(result).toContain("Gastcollege");
+    expect(result).toContain("Zaal B2");
+    expect(result).toContain("Weekoverzicht");
+  });
+
+  it("geeft melding als er niets is in de komende 7 dagen", async () => {
+    (mockClient.getWithHeaders as jest.Mock)
+      .mockResolvedValueOnce({ data: [], linkHeader: null })
+      .mockResolvedValueOnce({ data: [], linkHeader: null });
+
+    const result = await getWeekOverview(mockClient);
+    expect(result).toContain("Geen deadlines of events");
+  });
+});
+
+describe("getCourseProgress", () => {
+  it("toont voortgang met percentage en openstaande opdrachten", async () => {
+    (mockClient.getWithHeaders as jest.Mock)
+      .mockResolvedValueOnce({
+        data: [
+          { id: 1, name: "Opdracht A", due_at: "2026-07-01T00:00:00Z", points_possible: 10 },
+          { id: 2, name: "Opdracht B", due_at: null, points_possible: 20 },
+        ],
+        linkHeader: null,
+      })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            assignment_id: 1,
+            workflow_state: "graded",
+            score: 8,
+            grade: "8",
+            assignment: { name: "Opdracht A", points_possible: 10 },
+          },
+          {
+            assignment_id: 2,
+            workflow_state: "unsubmitted",
+            score: null,
+            grade: null,
+            assignment: { name: "Opdracht B", points_possible: 20 },
+          },
+        ],
+        linkHeader: null,
+      })
+      .mockResolvedValueOnce({
+        data: [
+          { id: 10, name: "Module 1", items_count: 5, workflow_state: "completed" },
+          { id: 11, name: "Module 2", items_count: 3, workflow_state: "active" },
+        ],
+        linkHeader: null,
+      });
+
+    const result = await getCourseProgress(mockClient, "1");
+    expect(result).toContain("1/2 ingeleverd");
+    expect(result).toContain("2 modules");
+    expect(result).toContain("Opdracht B");
+  });
+
+  it("geeft melding als er nog niets ingeleverd is", async () => {
+    (mockClient.getWithHeaders as jest.Mock)
+      .mockResolvedValueOnce({ data: [], linkHeader: null })
+      .mockResolvedValueOnce({ data: [], linkHeader: null })
+      .mockResolvedValueOnce({ data: [], linkHeader: null });
+
+    const result = await getCourseProgress(mockClient, "42");
+    expect(result).toContain("0/0 ingeleverd");
+  });
+});
+
+describe("getDeadlineBurndown", () => {
+  it("toont deadlines per week met bar", async () => {
+    const nextWeek = new Date(Date.now() + 86400000 * 8);
+
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({
+      data: [
+        {
+          plannable_type: "assignment",
+          plannable_date: new Date(Date.now() + 86400000 * 2).toISOString(),
+          plannable: { id: 1, title: "Opdracht 1" },
+          submissions: { submitted: true },
+        },
+        {
+          plannable_type: "assignment",
+          plannable_date: nextWeek.toISOString(),
+          plannable: { id: 2, title: "Opdracht 2" },
+          submissions: { submitted: false },
+        },
+      ],
+      linkHeader: null,
+    });
+
+    const result = await getDeadlineBurndown(mockClient);
+    expect(result).toContain("Deadline-burndown");
+    expect(result).toContain("Week");
+    expect(result).toContain("ingeleverd");
+    expect(result).toContain("Totaal");
+  });
+
+  it("geeft melding als er geen deadlines zijn", async () => {
+    (mockClient.getWithHeaders as jest.Mock).mockResolvedValue({ data: [], linkHeader: null });
+    const result = await getDeadlineBurndown(mockClient);
+    expect(result).toContain("Geen deadlines gevonden");
   });
 });

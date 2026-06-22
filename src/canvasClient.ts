@@ -42,6 +42,7 @@ function toCanvasError(error: unknown): CanvasApiError {
 
 export class CanvasClient {
   private http: AxiosInstance;
+  private cache = new Map<string, unknown>();
   readonly baseUrl: string;
 
   constructor({ baseUrl, accessToken }: CanvasClientOptions) {
@@ -60,6 +61,14 @@ export class CanvasClient {
       process.stderr.write(`[Canvas] ${config.method?.toUpperCase()} ${config.url}\n`);
       return config;
     });
+  }
+
+  cacheGet<T>(key: string): T | undefined {
+    return this.cache.get(key) as T | undefined;
+  }
+
+  cacheSet(key: string, value: unknown): void {
+    this.cache.set(key, value);
   }
 
   async get<T>(path: string, params?: Record<string, string | number | boolean>): Promise<T> {

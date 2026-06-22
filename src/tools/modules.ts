@@ -38,7 +38,7 @@ export async function listModules(client: CanvasClient, courseId: string): Promi
   }
 
   const lines = modules.map(
-    (m) => `- [${m.id}] ${m.name} (${m.items_count} items, status: ${m.workflow_state})`
+    (m) => `- [${m.id}] ${m.name} (${m.items_count} items)`
   );
 
   return `Modules voor cursus ${courseId} (${modules.length}):\n\n${lines.join("\n")}`;

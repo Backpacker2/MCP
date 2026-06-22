@@ -12,10 +12,16 @@ interface CanvasCourse {
 
 export const listCoursesSchema = z.object({});
 
+const CACHE_KEY = "courses:active";
+
 export async function listCourses(client: CanvasClient): Promise<string> {
-  const courses = await fetchAllPages<CanvasCourse>(client, "/api/v1/courses", {
-    enrollment_state: "active",
-  });
+  let courses = client.cacheGet<CanvasCourse[]>(CACHE_KEY);
+  if (!courses) {
+    courses = await fetchAllPages<CanvasCourse>(client, "/api/v1/courses", {
+      enrollment_state: "active",
+    });
+    client.cacheSet(CACHE_KEY, courses);
+  }
 
   if (courses.length === 0) {
     return "Je hebt momenteel geen actieve Canvas cursussen.";
