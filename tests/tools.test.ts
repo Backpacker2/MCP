@@ -501,6 +501,30 @@ describe("getCourseProgress", () => {
     const result = await getCourseProgress(mockClient, "42");
     expect(result).toContain("0/0 ingeleverd");
   });
+
+  it("splitst verlopen en toekomstige openstaande opdrachten", async () => {
+    const verleden = new Date(Date.now() - 86400000 * 10).toISOString(); // 10 dagen geleden
+    const toekomst = new Date(Date.now() + 86400000 * 10).toISOString(); // 10 dagen vooruit
+
+    (mockClient.getWithHeaders as jest.Mock)
+      .mockResolvedValueOnce({
+        data: [
+          { id: 1, name: "Verlopen opdracht", due_at: verleden, points_possible: 10 },
+          { id: 2, name: "Toekomstige opdracht", due_at: toekomst, points_possible: 10 },
+          { id: 3, name: "Geen deadline", due_at: null, points_possible: 10 },
+        ],
+        linkHeader: null,
+      })
+      .mockResolvedValueOnce({ data: [], linkHeader: null }) // geen submissions
+      .mockResolvedValueOnce({ data: [], linkHeader: null }); // geen modules
+
+    const result = await getCourseProgress(mockClient, "1");
+    expect(result).toContain("Nog in te leveren");
+    expect(result).toContain("Toekomstige opdracht");
+    expect(result).toContain("Geen deadline");
+    expect(result).toContain("Verlopen zonder inlevering");
+    expect(result).toContain("Verlopen opdracht");
+  });
 });
 
 describe("getDeadlineBurndown", () => {

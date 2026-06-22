@@ -201,18 +201,35 @@ export async function getCourseProgress(client: CanvasClient, courseId: string):
     `**Modules:** ${moduleStr}`,
   ];
 
+  const now = new Date();
+
   const openAssignments = assignments.filter((a) => {
     const sub = submissions.find((s) => s.assignment_id === a.id);
     return !sub || sub.workflow_state === "unsubmitted";
   });
 
-  if (openAssignments.length > 0) {
-    lines.push(``, `**Nog in te leveren (${openAssignments.length}):**`);
-    for (const a of openAssignments.slice(0, 10)) {
+  const toekomstig = openAssignments.filter(
+    (a) => !a.due_at || new Date(a.due_at) > now
+  );
+  const verlopen = openAssignments.filter(
+    (a) => a.due_at && new Date(a.due_at) <= now
+  );
+
+  if (toekomstig.length > 0) {
+    lines.push(``, `**Nog in te leveren (${toekomstig.length}):**`);
+    for (const a of toekomstig.slice(0, 10)) {
       const deadline = a.due_at ? `deadline ${isoToShort(a.due_at)}` : "geen deadline";
       lines.push(`- ${a.name} (${deadline})`);
     }
-    if (openAssignments.length > 10) lines.push(`... en ${openAssignments.length - 10} meer`);
+    if (toekomstig.length > 10) lines.push(`... en ${toekomstig.length - 10} meer`);
+  }
+
+  if (verlopen.length > 0) {
+    lines.push(``, `**Verlopen zonder inlevering (${verlopen.length}):**`);
+    for (const a of verlopen.slice(0, 5)) {
+      lines.push(`- ${a.name} (deadline was ${isoToShort(a.due_at)})`);
+    }
+    if (verlopen.length > 5) lines.push(`... en ${verlopen.length - 5} meer`);
   }
 
   return lines.join("\n");
