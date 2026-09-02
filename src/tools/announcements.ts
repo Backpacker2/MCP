@@ -21,8 +21,8 @@ interface CanvasAnnouncement {
 export async function getAnnouncements(client: CanvasClient, courseId: string): Promise<string> {
   const announcements = await fetchAllPages<CanvasAnnouncement>(
     client,
-    "/api/v1/announcements",
-    { "context_codes[]": `course_${courseId}`, per_page: 20 }
+    `/api/v1/courses/${courseId}/discussion_topics`,
+    { only_announcements: true, order_by: "recent_activity" }
   );
 
   if (announcements.length === 0) {
