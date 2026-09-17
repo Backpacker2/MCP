@@ -7,11 +7,13 @@ export class CanvasConfigError extends Error {
 
 export class CanvasApiError extends Error {
   statusCode: number;
+  canvasMessage?: string;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, canvasMessage?: string) {
     super(message);
     this.name = "CanvasApiError";
     this.statusCode = statusCode;
+    this.canvasMessage = canvasMessage;
   }
 }
 

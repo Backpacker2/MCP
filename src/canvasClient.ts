@@ -28,12 +28,24 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = MAX_RETRY_ATTEMP
   throw new CanvasApiError(429, statusCodeToMessage(429));
 }
 
+function extractCanvasMessage(data: unknown): string | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const d = data as Record<string, unknown>;
+  if (typeof d.message === "string") return d.message;
+  if (Array.isArray(d.errors) && d.errors.length > 0) {
+    const first = d.errors[0] as Record<string, unknown>;
+    if (typeof first.message === "string") return first.message;
+  }
+  return undefined;
+}
+
 function toCanvasError(error: unknown): CanvasApiError {
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError;
     const retryAfter = axiosError.response?.headers?.["retry-after"];
     const status = axiosError.response?.status ?? 0;
-    const err = new CanvasApiError(status, statusCodeToMessage(status));
+    const canvasMessage = extractCanvasMessage(axiosError.response?.data);
+    const err = new CanvasApiError(status, statusCodeToMessage(status), canvasMessage);
     if (retryAfter) (err as CanvasApiError & { retryAfter: string }).retryAfter = retryAfter;
     return err;
   }

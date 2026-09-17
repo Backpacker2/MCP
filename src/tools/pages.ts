@@ -94,7 +94,11 @@ export async function listPages(client: CanvasClient, courseId: string): Promise
 
     return `Gepubliceerde pagina's voor cursus ${courseId} (${lines.length}):\n\n${lines.join("\n")}`;
   } catch (err) {
-    if (err instanceof CanvasApiError && err.statusCode === 404) {
+    if (
+      err instanceof CanvasApiError &&
+      err.statusCode === 404 &&
+      err.canvasMessage?.includes("disabled")
+    ) {
       return listPagesFromModules(client, courseId);
     }
     throw err;
