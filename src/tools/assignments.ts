@@ -26,6 +26,8 @@ export const getAssignmentDetailsSchema = z.object({
   assignmentId: idParam.describe("Het Canvas assignment ID."),
 });
 
+const getAssignmentGroupsSchema = z.object({ courseId: idParam });
+
 export async function listAssignments(client: CanvasClient, courseId: string): Promise<string> {
   const assignments = await fetchAllPages<CanvasAssignment>(
     client,
@@ -74,6 +76,43 @@ export async function getAssignmentDetails(
   ].join("\n");
 }
 
+interface AssignmentGroup {
+  id: number;
+  name: string;
+  group_weight: number;
+  assignments?: Array<{ id: number; name: string; due_at: string | null; points_possible: number | null }>;
+}
+
+export async function getAssignmentGroups(client: CanvasClient, courseId: string): Promise<string> {
+  const groups = await fetchAllPages<AssignmentGroup>(
+    client,
+    `/api/v1/courses/${courseId}/assignment_groups`,
+    { "include[]": "assignments" } as Record<string, string>
+  );
+
+  if (groups.length === 0) {
+    return `Geen opdrachtgroepen gevonden voor cursus ${courseId}.`;
+  }
+
+  const lines: string[] = [];
+  for (const g of groups) {
+    const weight = g.group_weight > 0 ? ` (${g.group_weight}% weging)` : "";
+    lines.push(`**${g.name}**${weight}`);
+    const assignments = g.assignments ?? [];
+    if (assignments.length === 0) {
+      lines.push("  Geen opdrachten in deze groep.");
+    } else {
+      for (const a of assignments) {
+        const due = a.due_at ? formatDate(a.due_at) : "geen deadline";
+        const pts = a.points_possible !== null ? ` | ${a.points_possible} pt` : "";
+        lines.push(`  - [${a.id}] ${a.name} (${due}${pts})`);
+      }
+    }
+  }
+
+  return `Opdrachtgroepen voor cursus ${courseId}:\n\n${lines.join("\n")}`;
+}
+
 export const assignmentTools = [
   {
     name: "canvas_list_assignments",
@@ -114,5 +153,20 @@ export const assignmentTools = [
     schema: getAssignmentDetailsSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       getAssignmentDetails(client, args.courseId, args.assignmentId),
+  },
+  {
+    name: "canvas_get_assignment_groups",
+    description:
+      "Haal de opdrachtgroepen op voor een cursus, met hun weging en de bijbehorende opdrachten. Geeft inzicht in hoe opdrachten georganiseerd zijn.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        courseId: { type: "string", description: "Het Canvas course ID." },
+      },
+      required: ["courseId"],
+    },
+    schema: getAssignmentGroupsSchema,
+    handler: (client: CanvasClient, args: Record<string, string>) =>
+      getAssignmentGroups(client, args.courseId),
   },
 ];

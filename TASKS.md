@@ -2,6 +2,14 @@
 
 ## Active
 
+- [x] ~~**`canvas_get_missing_submissions`**~~ ✅
+- [x] ~~**`canvas_get_course_competencies`**~~ ✅ — 108 competenties in 4 niveaus (HBOI)
+- [x] ~~**`canvas_get_course_homepage`**~~ ✅
+- [x] ~~**`canvas_list_my_groups`**~~ ✅ — 5 groepen over 3 cursussen
+- [x] ~~**`canvas_get_activity_stream`**~~ ✅ — 24 items
+- [x] ~~**`canvas_get_todo`**~~ ✅ — 3 openstaande items
+- [x] ~~**`canvas_get_submission_feedback`**~~ — overgeslagen, al gedekt door bestaande `canvas_get_submission`
+- [x] ~~**`canvas_get_assignment_groups`**~~ ✅
 
 ## Waiting On
 

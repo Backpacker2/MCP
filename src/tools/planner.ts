@@ -4,6 +4,7 @@ import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
 
 const getUpcomingDeadlinesSchema = z.object({});
+const getMissingSubmissionsSchema = z.object({});
 
 interface PlannerItem {
   plannable_type: string;
@@ -47,6 +48,38 @@ export async function getUpcomingDeadlines(client: CanvasClient): Promise<string
   return `Aankomende deadlines (${sorted.length}):\n\n${lines.join("\n")}`;
 }
 
+interface MissingAssignment {
+  id: number;
+  name: string;
+  due_at: string | null;
+  course_id: number;
+  points_possible: number | null;
+}
+
+export async function getMissingSubmissions(client: CanvasClient): Promise<string> {
+  const [missing, courses] = await Promise.all([
+    fetchAllPages<MissingAssignment>(client, "/api/v1/users/self/missing_submissions"),
+    fetchAllPages<{ id: number; name: string }>(client, "/api/v1/courses", {
+      enrollment_state: "active",
+    }),
+  ]);
+
+  if (missing.length === 0) {
+    return "Geen ontbrekende indieningen gevonden. Alles is op tijd ingeleverd!";
+  }
+
+  const courseMap = new Map(courses.map((c) => [c.id, c.name]));
+
+  const lines = missing.map((a) => {
+    const courseName = courseMap.get(a.course_id) ?? `Cursus ${a.course_id}`;
+    const due = a.due_at ? formatDate(a.due_at) : "geen deadline";
+    const pts = a.points_possible !== null ? ` (${a.points_possible} pt)` : "";
+    return `- **${a.name}**${pts}\n  Cursus: ${courseName} | Deadline was: ${due}`;
+  });
+
+  return `Ontbrekende indieningen (${missing.length}):\n\n${lines.join("\n")}`;
+}
+
 export const plannerTools = [
   {
     name: "canvas_get_upcoming_deadlines",
@@ -59,5 +92,13 @@ export const plannerTools = [
     },
     schema: getUpcomingDeadlinesSchema,
     handler: (client: CanvasClient) => getUpcomingDeadlines(client),
+  },
+  {
+    name: "canvas_get_missing_submissions",
+    description:
+      "Haal alle verlopen opdrachten op die je nog niet hebt ingeleverd, over alle cursussen. Nuttig om te checken wat je gemist hebt.",
+    inputSchema: { type: "object" as const, properties: {}, required: [] },
+    schema: getMissingSubmissionsSchema,
+    handler: (client: CanvasClient) => getMissingSubmissions(client),
   },
 ];

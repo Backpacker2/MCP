@@ -23,6 +23,8 @@ import { discussionTools } from "./tools/discussions.js";
 import { inboxTools } from "./tools/inbox.js";
 import { eportfolioTools } from "./tools/eportfolio.js";
 import { reportTools } from "./tools/reports.js";
+import { outcomeTools } from "./tools/outcomes.js";
+import { userTools } from "./tools/user.js";
 
 const config = loadConfig();
 const client = new CanvasClient({
@@ -44,6 +46,8 @@ const allTools = [
   ...inboxTools,
   ...eportfolioTools,
   ...reportTools,
+  ...outcomeTools,
+  ...userTools,
 ];
 
 const server = new Server(
