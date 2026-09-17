@@ -300,6 +300,85 @@ export async function getDeadlineBurndown(client: CanvasClient): Promise<string>
   return lines.join("\n");
 }
 
+// --- canvas_get_portfolio_evidence ---
+
+interface PortfolioSubmission {
+  assignment_id: number;
+  workflow_state: string;
+  submitted_at: string | null;
+  score: number | null;
+  grade: string | null;
+  submission_comments?: Array<{ author_name: string; comment: string }>;
+  assignment?: { name: string; points_possible: number | null };
+}
+
+interface PortfolioModuleItem {
+  type: string;
+  title: string;
+  page_url?: string | null;
+  completion_requirement?: { type: string; completed: boolean };
+}
+
+interface PortfolioModule {
+  id: number;
+  name: string;
+}
+
+export async function getPortfolioEvidence(client: CanvasClient, courseId: string): Promise<string> {
+  const [submissions, modules] = await Promise.all([
+    fetchAllPages<PortfolioSubmission>(
+      client,
+      `/api/v1/courses/${courseId}/students/submissions`,
+      { "student_ids[]": "self", "include[]": "assignment" } as Record<string, string>
+    ),
+    fetchAllPages<PortfolioModule>(client, `/api/v1/courses/${courseId}/modules`),
+  ]);
+
+  const lines: string[] = [`## Portfolio evidence — cursus ${courseId}\n`];
+
+  // Beoordeelde en ingeleverde opdrachten
+  const graded = submissions.filter((s) => s.workflow_state === "graded" || s.workflow_state === "submitted");
+  if (graded.length === 0) {
+    lines.push("**Indieningen:** Nog geen beoordeelde opdrachten.");
+  } else {
+    lines.push(`**Indieningen (${graded.length}) — mogelijke portfoliobewijzen:**\n`);
+    for (const s of graded) {
+      const name = s.assignment?.name ?? `Opdracht ${s.assignment_id}`;
+      const grade = s.grade !== null ? ` | Beoordeling: ${s.grade}` : "";
+      const pts = s.score !== null && s.assignment?.points_possible
+        ? ` (${s.score}/${s.assignment.points_possible})`
+        : "";
+      const date = s.submitted_at ? ` | Ingeleverd: ${isoToShort(s.submitted_at)}` : "";
+      lines.push(`- **${name}**${grade}${pts}${date}`);
+
+      const comments = (s.submission_comments ?? []).filter((c) => c.comment.trim());
+      if (comments.length > 0) {
+        for (const c of comments) {
+          lines.push(`  → Feedback (${c.author_name}): ${c.comment.slice(0, 150)}${c.comment.length > 150 ? "…" : ""}`);
+        }
+      }
+    }
+  }
+
+  // Pagina's uit modules als documentatiebronnen
+  lines.push(`\n**Cursuspagina's per module (als documentatiebron):**\n`);
+  for (const mod of modules) {
+    const items = await fetchAllPages<PortfolioModuleItem>(
+      client,
+      `/api/v1/courses/${courseId}/modules/${mod.id}/items`
+    );
+    const pages = items.filter((i) => i.type === "Page" && i.page_url);
+    if (pages.length > 0) {
+      lines.push(`[${mod.name}]`);
+      for (const p of pages) {
+        lines.push(`  - ${p.title} → ${p.page_url}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
 // --- exports ---
 
 export const reportTools = [
@@ -344,5 +423,23 @@ export const reportTools = [
     },
     schema: z.object({}),
     handler: (client: CanvasClient) => getDeadlineBurndown(client),
+  },
+  {
+    name: "canvas_get_portfolio_evidence",
+    description:
+      "Overzicht van beoordeelde indieningen met feedback én een lijst van cursuspagina's per module. Gebruik dit als startpunt om te bespreken wat als portfoliobewijs kan dienen.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        courseId: {
+          type: "string",
+          description: "Het Canvas course ID. Gebruik canvas_list_courses om dit te vinden.",
+        },
+      },
+      required: ["courseId"],
+    },
+    schema: z.object({ courseId: idParam }),
+    handler: (client: CanvasClient, args: Record<string, string>) =>
+      getPortfolioEvidence(client, args.courseId),
   },
 ];

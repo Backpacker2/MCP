@@ -2,7 +2,6 @@
 
 ## Active
 
-- [ ] **Portfolio evidence suggesties (v3)** - Claude suggereert welke cursusonderdelen als portfoliobewijzen dienen.
 
 ## Waiting On
 
@@ -30,6 +29,7 @@
 - [x] ~~FeedPulse rechten uitzoeken~~ (17 sep 2026) — is `fhict.feedpulse.com`, geen publieke REST API; alleen via LTI-iframe bereikbaar
 - [x] ~~Portflow onderzoeken~~ (17 sep 2026) — is "Portfolio" van Drieam (`portfolio.drieam.app`), geen publieke REST API
 - [x] ~~`canvas_course_overview` toevoegen~~ (17 sep 2026) — alle modules + items in één aanroep, 9 modules/39 items/2823 tekens
+- [x] ~~`canvas_get_portfolio_evidence` toevoegen~~ (17 sep 2026) — beoordeelde indieningen + cursuspagina's per module
 
 ---
 
