@@ -25,6 +25,7 @@ import { eportfolioTools } from "./tools/eportfolio.js";
 import { reportTools } from "./tools/reports.js";
 import { outcomeTools } from "./tools/outcomes.js";
 import { userTools } from "./tools/user.js";
+import { portflowTools } from "./tools/portflow.js";
 
 const config = loadConfig();
 const client = new CanvasClient({
@@ -48,6 +49,7 @@ const allTools = [
   ...reportTools,
   ...outcomeTools,
   ...userTools,
+  ...portflowTools,
 ];
 
 const server = new Server(

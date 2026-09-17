@@ -11,6 +11,8 @@
 - [x] ~~**`canvas_get_submission_feedback`**~~ — overgeslagen, al gedekt door bestaande `canvas_get_submission`
 - [x] ~~**`canvas_get_assignment_groups`**~~ ✅
 
+- [x] ~~**Portflow MCP tools implementeren**~~ (17 sep 2026) — `portflow_list_snapshots`, `portflow_get_snapshot`, `portflow_submit_snapshot` + LTI auth module + Portflow API client
+
 ## Waiting On
 
 ## Someday
@@ -35,7 +37,7 @@
 - [x] ~~`canvas_list_eportfolios` vriendelijke foutafhandeling~~ (17 sep 2026)
 - [x] ~~Rate-limit retry logic (exponential backoff bij 429)~~ — was al geïmplementeerd in canvasClient.ts
 - [x] ~~FeedPulse rechten uitzoeken~~ (17 sep 2026) — is `fhict.feedpulse.com`, geen publieke REST API; alleen via LTI-iframe bereikbaar
-- [x] ~~Portflow onderzoeken~~ (17 sep 2026) — is "Portfolio" van Drieam (`portfolio.drieam.app`), geen publieke REST API
+- [x] ~~Portflow API onderzoeken~~ (17 sep 2026) — heeft WEL een REST API! Authenticatie via LTI 1.3 OIDC, Bearer JWT (8u geldig), endpoints voor snapshots, freeze en Canvas assessment submission gedocumenteerd
 - [x] ~~`canvas_course_overview` toevoegen~~ (17 sep 2026) — alle modules + items in één aanroep, 9 modules/39 items/2823 tekens
 - [x] ~~`canvas_get_portfolio_evidence` toevoegen~~ (17 sep 2026) — beoordeelde indieningen + cursuspagina's per module
 
@@ -67,5 +69,50 @@
 | `canvas_list_eportfolios` | 404 HTML pagina | FHICT heeft ePortfolio API uitgeschakeld |
 
 ### Externe tools (LTI)
-- **FeedPulse**: aanwezig als cursus-tab (LTI ID 1067), maar géén Canvas REST API — extern platform
-- **Portflow**: niet gevonden als Canvas-tab in de 3 cursussen — extern platform, los van Canvas
+- **FeedPulse**: aanwezig als cursus-tab (LTI ID 1067), maar géén publieke REST API — extern platform
+- **Portflow**: LTI tool ID 23360, `portfolio.drieam.app` — heeft WEL een REST API (zie onderzoek hieronder)
+
+---
+
+## Portflow API Onderzoek (17 sep 2026)
+
+### Authenticatie
+Portflow gebruikt LTI 1.3 (OIDC). De volgende flow werkt programmatisch:
+1. `GET /api/v1/courses/{courseId}/external_tools/sessionless_launch?id=23360` → Canvas geeft session_token URL
+2. `GET` die URL (met cookies) → HTML met LTI form (iss, login_hint, client_id, lti_message_hint etc.)
+3. `POST portfolio.drieam.app/lti/open_id` met die form params → redirect naar Canvas `/api/lti/authorize`
+4. Canvas redirects terug met HTML-form met `id_token` JWT
+5. `POST portfolio.drieam.app/lti/launches` met `id_token` + `state` → Portflow rendert de SPA
+6. De SPA HTML bevat `data-session="<JWT>"` — dit is het **Bearer token** voor alle API calls
+7. JWT bevat: `current_launch_id`, `current_user_id: 8784`, `tenant: fhict_instructure_com` — verloopt in 8 uur
+
+### Beschikbare API Endpoints
+Base URL: `https://portfolio.drieam.app` | Header: `Authorization: Bearer <session_jwt>`
+
+| Endpoint | Methode | Beschrijving |
+|----------|---------|--------------|
+| `/api/v1/users/current` | GET | Huidige gebruiker (id: 8784, name, lms_id) |
+| `/api/v1/frozen-portfolios` | GET | Alle snapshots (17 stuks) |
+| `/api/v1/frozen-portfolios/{id}` | GET | Snapshot details incl. `snapshot_code` |
+| `/api/v1/frozen-portfolios/{id}` | DELETE | Snapshot verwijderen |
+| `/api/v1/frozen-portfolios/{id}/assessment` | **POST** | **Snapshot inleveren bij Canvas assignment** |
+| `/api/v1/frozen-portfolios/{id}/showcase` | POST/DELETE | Publieke showcase URL aan/uitzetten |
+| `/api/v1/portfolios/{id}/freeze` | **POST** | **Nieuwe snapshot aanmaken** (body: JSON) |
+| `/api/v1/portfolios/{id}/freeze-summary` | POST | Snapshot samenvatting aanmaken |
+| `/api/v1/portfolios/{id}/sections` | GET/POST | Secties ophalen/aanmaken |
+| `/api/v1/portfolios/{id}/sections/{id}` | PATCH/DELETE | Sectie bijwerken/verwijderen |
+| `/api/v1/portfolios/{id}/collections/{id}/evidence` | GET | Bewijs in een collectie |
+| `/api/v1/portfolios/{id}/portfolio-freezes/sections` | GET | Secties voor snapshot-selectie |
+
+### Belangrijke Bevindingen
+- **Assessment endpoint heeft GEEN body** — de Canvas-context (cursus + opdracht) zit in het JWT (via de LTI launch)
+- **JWT moet per opdracht worden aangevraagd**: launch `external_tools/sessionless_launch?id=23360` vanuit de juiste cursus
+- **Live portfolio ID** is nog niet gevonden (SPA laadt het via React context, niet via een directe /api endpoint)
+- **Snapshots**: 17 aangemaakt, nieuwste: "Personal Project Pitch" (ID: 82998, code: SNAP8ZJPH9DB)
+
+### Volgende Stap voor Implementatie
+1. Sessionless launch uitvoeren vanuit de specifieke Canvas-opdracht (bijv. `assignment_id=275053`)
+2. LTI flow afhandelen → Bearer JWT ophalen
+3. `POST /api/v1/frozen-portfolios/{snapshotId}/assessment` → Canvas submission
+
+**⚠️ Beperking**: de LTI JWT is 8 uur geldig — moet elke keer opnieuw worden aangevraagd via Canvas. Dit is complex om als MCP tool te implementeren (vereist multi-step LTI handshake + cookie state).
