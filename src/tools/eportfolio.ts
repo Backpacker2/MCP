@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
+import { CanvasApiError } from "../errors.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
@@ -24,47 +25,64 @@ const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
 const listEportfoliosSchema = z.object({});
 const getEportfolioPagesSchema = z.object({ eportfolioId: idParam });
 
+const EPORTFOLIO_UNAVAILABLE =
+  "De ePortfolio API is niet beschikbaar bij deze Canvas-instantie. De instelling heeft dit uitgeschakeld.";
+
 export async function listEportfolios(client: CanvasClient): Promise<string> {
-  const portfolios = await fetchAllPages<CanvasEportfolio>(
-    client,
-    "/api/v1/users/self/eportfolios"
-  );
+  try {
+    const portfolios = await fetchAllPages<CanvasEportfolio>(
+      client,
+      "/api/v1/users/self/eportfolios"
+    );
 
-  if (portfolios.length === 0) {
-    return "Je hebt nog geen ePortfolios aangemaakt in Canvas.";
+    if (portfolios.length === 0) {
+      return "Je hebt nog geen ePortfolios aangemaakt in Canvas.";
+    }
+
+    const lines = portfolios.map((p) => {
+      const updated = formatDate(p.updated_at);
+      const visibility = p.public ? "openbaar" : "privé";
+      return `- [${p.id}] ${p.name} (${visibility}, bijgewerkt: ${updated})`;
+    });
+
+    return `Jouw Canvas ePortfolios (${portfolios.length}):\n\n${lines.join("\n")}`;
+  } catch (err) {
+    if (err instanceof CanvasApiError && err.statusCode === 404) {
+      return EPORTFOLIO_UNAVAILABLE;
+    }
+    throw err;
   }
-
-  const lines = portfolios.map((p) => {
-    const updated = formatDate(p.updated_at);
-    const visibility = p.public ? "openbaar" : "privé";
-    return `- [${p.id}] ${p.name} (${visibility}, bijgewerkt: ${updated})`;
-  });
-
-  return `Jouw Canvas ePortfolios (${portfolios.length}):\n\n${lines.join("\n")}`;
 }
 
 export async function getEportfolioPages(
   client: CanvasClient,
   eportfolioId: string
 ): Promise<string> {
-  const pages = await fetchAllPages<CanvasEportfolioPage>(
-    client,
-    `/api/v1/eportfolios/${eportfolioId}/pages`
-  );
+  try {
+    const pages = await fetchAllPages<CanvasEportfolioPage>(
+      client,
+      `/api/v1/eportfolios/${eportfolioId}/pages`
+    );
 
-  if (pages.length === 0) {
-    return `Geen pagina's gevonden in ePortfolio ${eportfolioId}.`;
+    if (pages.length === 0) {
+      return `Geen pagina's gevonden in ePortfolio ${eportfolioId}.`;
+    }
+
+    const sorted = [...pages].sort((a, b) => a.position - b.position);
+
+    const lines = sorted.map((p) => {
+      const updated = formatDate(p.updated_at);
+      const preview = p.content ? `\n  ${cleanHtml(p.content).slice(0, 150)}…` : "";
+      return `- [${p.id}] ${p.name} (bijgewerkt: ${updated})${preview}`;
+    });
+
+    return `Pagina's in ePortfolio ${eportfolioId} (${sorted.length}):\n\n${lines.join("\n")}`;
+  } catch (err) {
+    if (err instanceof CanvasApiError && err.statusCode === 404) {
+      return EPORTFOLIO_UNAVAILABLE;
+    }
+    throw err;
   }
-
-  const sorted = [...pages].sort((a, b) => a.position - b.position);
-
-  const lines = sorted.map((p) => {
-    const updated = formatDate(p.updated_at);
-    const preview = p.content ? `\n  ${cleanHtml(p.content).slice(0, 150)}…` : "";
-    return `- [${p.id}] ${p.name} (bijgewerkt: ${updated})${preview}`;
-  });
-
-  return `Pagina's in ePortfolio ${eportfolioId} (${sorted.length}):\n\n${lines.join("\n")}`;
 }
 
 export const eportfolioTools = [

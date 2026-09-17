@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
+import { CanvasApiError } from "../errors.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
@@ -26,25 +27,78 @@ interface CanvasPageDetail {
   published: boolean;
 }
 
-export async function listPages(client: CanvasClient, courseId: string): Promise<string> {
-  const pages = await fetchAllPages<CanvasPage>(
+interface CanvasModule {
+  id: number;
+  name: string;
+}
+
+interface CanvasModulePageItem {
+  type: string;
+  title: string;
+  page_url: string | null;
+}
+
+async function listPagesFromModules(client: CanvasClient, courseId: string): Promise<string> {
+  const modules = await fetchAllPages<CanvasModule>(
     client,
-    `/api/v1/courses/${courseId}/pages`,
-    { sort: "updated_at", order: "desc" }
+    `/api/v1/courses/${courseId}/modules`
   );
 
-  if (pages.length === 0) {
-    return `Geen pagina's gevonden voor cursus ${courseId}.`;
+  if (modules.length === 0) {
+    return `De pagina's-functie is uitgeschakeld voor cursus ${courseId} en er zijn geen modules beschikbaar.`;
   }
 
-  const lines = pages
-    .filter((p) => p.published)
-    .map((p) => {
-      const updated = formatDate(p.updated_at);
-      return `- ${p.title} (bijgewerkt: ${updated})\n  Slug: ${p.url}`;
-    });
+  const pageItems: Array<{ moduleName: string; title: string; slug: string }> = [];
 
-  return `Gepubliceerde pagina's voor cursus ${courseId} (${lines.length}):\n\n${lines.join("\n")}`;
+  for (const mod of modules) {
+    const items = await fetchAllPages<CanvasModulePageItem>(
+      client,
+      `/api/v1/courses/${courseId}/modules/${mod.id}/items`
+    );
+    for (const item of items) {
+      if (item.type === "Page" && item.page_url) {
+        pageItems.push({ moduleName: mod.name, title: item.title, slug: item.page_url });
+      }
+    }
+  }
+
+  if (pageItems.length === 0) {
+    return `De pagina's-functie is uitgeschakeld voor cursus ${courseId} en er zijn geen pagina's gevonden in de modules.`;
+  }
+
+  const lines = pageItems.map(
+    (p) => `- ${p.title}\n  Module: ${p.moduleName}\n  Slug: ${p.slug}`
+  );
+
+  return `Pagina's in cursus ${courseId} via modules (${pageItems.length}):\n\nGebruik canvas_get_page_content met de Slug om een pagina te lezen.\n\n${lines.join("\n")}`;
+}
+
+export async function listPages(client: CanvasClient, courseId: string): Promise<string> {
+  try {
+    const pages = await fetchAllPages<CanvasPage>(
+      client,
+      `/api/v1/courses/${courseId}/pages`,
+      { sort: "updated_at", order: "desc" }
+    );
+
+    if (pages.length === 0) {
+      return `Geen pagina's gevonden voor cursus ${courseId}.`;
+    }
+
+    const lines = pages
+      .filter((p) => p.published)
+      .map((p) => {
+        const updated = formatDate(p.updated_at);
+        return `- ${p.title} (bijgewerkt: ${updated})\n  Slug: ${p.url}`;
+      });
+
+    return `Gepubliceerde pagina's voor cursus ${courseId} (${lines.length}):\n\n${lines.join("\n")}`;
+  } catch (err) {
+    if (err instanceof CanvasApiError && err.statusCode === 404) {
+      return listPagesFromModules(client, courseId);
+    }
+    throw err;
+  }
 }
 
 // pageUrl is de "slug" van de pagina, bijvoorbeeld "weekplanning".

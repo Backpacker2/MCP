@@ -5,6 +5,7 @@ import { fetchAllPages } from "../pagination.js";
 const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
 const listModulesSchema = z.object({ courseId: idParam });
 const getModuleItemsSchema = z.object({ courseId: idParam, moduleId: idParam });
+const courseOverviewSchema = z.object({ courseId: idParam });
 
 interface CanvasModule {
   id: number;
@@ -21,6 +22,7 @@ interface CanvasModuleItem {
   position: number;
   indent: number;
   html_url: string | null;
+  page_url?: string | null;
   completion_requirement?: {
     type: string;
     completed: boolean;
@@ -67,6 +69,38 @@ export async function getModuleItems(
   return `Items in module ${moduleId} (${items.length}):\n\n${lines.join("\n")}`;
 }
 
+export async function courseOverview(client: CanvasClient, courseId: string): Promise<string> {
+  const modules = await fetchAllPages<CanvasModule>(
+    client,
+    `/api/v1/courses/${courseId}/modules`
+  );
+
+  if (modules.length === 0) {
+    return `Geen modules gevonden voor cursus ${courseId}.`;
+  }
+
+  const sections: string[] = [];
+  let totalItems = 0;
+
+  for (const mod of modules) {
+    const items = await fetchAllPages<CanvasModuleItem>(
+      client,
+      `/api/v1/courses/${courseId}/modules/${mod.id}/items`
+    );
+    totalItems += items.length;
+
+    const lines = items.map((item) => {
+      const done = item.completion_requirement?.completed ? " ✓" : "";
+      const slug = item.page_url ? ` → ${item.page_url}` : "";
+      return `  ${item.type}: ${item.title}${slug}${done}`;
+    });
+
+    sections.push(`[${mod.name}] ${items.length} items\n${lines.join("\n")}`);
+  }
+
+  return `Cursus ${courseId} — ${modules.length} modules, ${totalItems} items\n\n${sections.join("\n\n")}`;
+}
+
 export const moduleTools = [
   {
     name: "canvas_list_modules",
@@ -107,5 +141,23 @@ export const moduleTools = [
     schema: getModuleItemsSchema,
     handler: (client: CanvasClient, args: Record<string, string>) =>
       getModuleItems(client, args.courseId, args.moduleId),
+  },
+  {
+    name: "canvas_course_overview",
+    description:
+      "Geeft een compact overzicht van alle modules én hun items in één aanroep. Gebruik dit als je de volledige cursusstructuur wilt zien zonder meerdere losse module-aanroepen.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        courseId: {
+          type: "string",
+          description: "Het Canvas course ID.",
+        },
+      },
+      required: ["courseId"],
+    },
+    schema: courseOverviewSchema,
+    handler: (client: CanvasClient, args: Record<string, string>) =>
+      courseOverview(client, args.courseId),
   },
 ];

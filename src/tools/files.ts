@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CanvasClient } from "../canvasClient.js";
+import { CanvasApiError } from "../errors.js";
 import { fetchAllPages } from "../pagination.js";
 import { formatDate } from "../utils/formatDate.js";
 
@@ -24,23 +25,30 @@ function formatBytes(bytes: number): string {
 }
 
 export async function listFiles(client: CanvasClient, courseId: string): Promise<string> {
-  const files = await fetchAllPages<CanvasFile>(
-    client,
-    `/api/v1/courses/${courseId}/files`,
-    { sort: "updated_at", order: "desc" }
-  );
+  try {
+    const files = await fetchAllPages<CanvasFile>(
+      client,
+      `/api/v1/courses/${courseId}/files`,
+      { sort: "updated_at", order: "desc" }
+    );
 
-  if (files.length === 0) {
-    return `Geen bestanden gevonden voor cursus ${courseId}.`;
+    if (files.length === 0) {
+      return `Geen bestanden gevonden voor cursus ${courseId}.`;
+    }
+
+    const lines = files.map((f) => {
+      const size = formatBytes(f.size);
+      const updated = formatDate(f.updated_at);
+      return `- [${f.id}] ${f.display_name} (${f["content-type"]}, ${size}, bijgewerkt: ${updated})`;
+    });
+
+    return `Bestanden voor cursus ${courseId} (${files.length}):\n\n${lines.join("\n")}`;
+  } catch (err) {
+    if (err instanceof CanvasApiError && err.statusCode === 403) {
+      return `Geen toegang tot de bestandenlijst voor cursus ${courseId}. De instelling heeft de toegang tot bestanden beperkt voor studenten.`;
+    }
+    throw err;
   }
-
-  const lines = files.map((f) => {
-    const size = formatBytes(f.size);
-    const updated = formatDate(f.updated_at);
-    return `- [${f.id}] ${f.display_name} (${f["content-type"]}, ${size}, bijgewerkt: ${updated})`;
-  });
-
-  return `Bestanden voor cursus ${courseId} (${files.length}):\n\n${lines.join("\n")}`;
 }
 
 export const fileTools = [
