@@ -5,6 +5,12 @@ import {
   listSnapshots,
   getSnapshot,
   submitSnapshotToCanvas,
+  listSections,
+  createSection,
+  listCollections,
+  createCollection,
+  createFreeTextEvidence,
+  getPortfolioId,
 } from "../portflow/client.js";
 import { formatDate } from "../utils/formatDate.js";
 
@@ -95,6 +101,69 @@ async function handleSubmitSnapshot(
   return `Snapshot ${snapshotId} succesvol ingeleverd bij de Canvas opdracht in cursus ${courseId}.`;
 }
 
+const addEvidenceSchema = z.object({
+  courseId: courseIdParam,
+  portfolioId: z.string().regex(/^\d+$/, "portfolioId mag alleen cijfers bevatten").optional(),
+  name: z.string().min(1, "Naam is verplicht").max(200),
+  content: z.string().min(1, "Inhoud is verplicht"),
+  sectionName: z.string().optional(),
+  collectionName: z.string().optional(),
+});
+
+async function handleAddEvidence(
+  client: CanvasClient,
+  args: Record<string, string>
+): Promise<string> {
+  const { courseId, portfolioId: portfolioIdStr, name, content, sectionName, collectionName } = addEvidenceSchema.parse(args);
+  const jwt = await getPortflowJwt(client, courseId);
+
+  let portfolioId: number;
+  if (portfolioIdStr) {
+    portfolioId = parseInt(portfolioIdStr, 10);
+  } else {
+    portfolioId = await getPortfolioId(jwt);
+  }
+
+  let collectionIds: number[] = [];
+
+  if (sectionName || collectionName) {
+    const sections = await listSections(jwt, portfolioId);
+
+    let sectionId: number;
+    if (sectionName) {
+      const existing = sections.find(
+        (s) => s.name.toLowerCase() === sectionName.toLowerCase()
+      );
+      if (existing) {
+        sectionId = existing.id;
+      } else {
+        const newSection = await createSection(jwt, portfolioId, sectionName);
+        sectionId = newSection.id;
+      }
+    } else {
+      sectionId = sections[0]?.id;
+    }
+
+    if (collectionName && sectionId) {
+      const collections = await listCollections(jwt, portfolioId);
+      const existingCol = collections.find(
+        (c) => c.name.toLowerCase() === collectionName.toLowerCase() && c.section_id === sectionId
+      );
+      if (existingCol) {
+        collectionIds = [existingCol.id];
+      } else {
+        const newCol = await createCollection(jwt, portfolioId, collectionName, sectionId);
+        collectionIds = [newCol.id];
+      }
+    }
+  }
+
+  const evidence = await createFreeTextEvidence(jwt, portfolioId, name, content, collectionIds);
+
+  const linked = collectionIds.length > 0 ? ` en gekoppeld aan ${collectionIds.length} collectie(s)` : "";
+  return `Bewijs "${evidence.name}" (ID: ${evidence.id}) aangemaakt in portfolio${linked}.\nType: ${evidence.latest_version_type} | Aangemaakt: ${evidence.created_at}`;
+}
+
 export const portflowTools = [
   {
     name: "portflow_list_snapshots",
@@ -156,5 +225,42 @@ export const portflowTools = [
     },
     schema: submitSnapshotSchema,
     handler: handleSubmitSnapshot,
+  },
+  {
+    name: "portflow_add_evidence",
+    description:
+      "Voeg een stuk vrije tekst toe als bewijs (evidence) aan een Portflow portfolio. Optioneel in een bestaande of nieuwe sectie + collectie. Bewijs wordt zichtbaar in de Portflow UI.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        courseId: {
+          type: "string",
+          description: "Canvas cursus-ID om de Portflow sessie te starten (bijv. 15807).",
+        },
+        portfolioId: {
+          type: "string",
+          description: "Optioneel: het numerieke ID van het portfolio (standaard: automatisch ophalen).",
+        },
+        name: {
+          type: "string",
+          description: "Naam/titel van het bewijs (max 200 tekens).",
+        },
+        content: {
+          type: "string",
+          description: "HTML-inhoud van het bewijs, bijv. '<p>Mijn reflectie...</p>'.",
+        },
+        sectionName: {
+          type: "string",
+          description: "Optioneel: naam van de sectie om het bewijs in te plaatsen. Wordt aangemaakt als niet bestaat.",
+        },
+        collectionName: {
+          type: "string",
+          description: "Optioneel: naam van de collectie binnen de sectie. Wordt aangemaakt als niet bestaat.",
+        },
+      },
+      required: ["courseId", "name", "content"],
+    },
+    schema: addEvidenceSchema,
+    handler: handleAddEvidence,
   },
 ];
