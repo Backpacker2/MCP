@@ -64,6 +64,13 @@ async function portflowFetch<T>(
     );
   }
 
+  if (response.status === 204 || text.trim() === "") {
+    if (!response.ok) {
+      throw new CanvasApiError(response.status, `Portflow API fout (status ${response.status}).`);
+    }
+    return null as T;
+  }
+
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -110,6 +117,36 @@ export interface PortflowUser {
   current_role: string;
 }
 
+export interface PortflowEvidence {
+  id: number;
+  portfolio_id: number;
+  name: string;
+  description: string | null;
+  feedback_status: string;
+  created_at: string;
+  updated_at: string;
+  versions_count: number;
+  collections_count: number;
+  latest_version_type: string;
+  date: string | null;
+  location: string | null;
+  duration: number | null;
+}
+
+export interface PortflowSection {
+  id: number;
+  name: string;
+  position: number;
+}
+
+export interface PortflowCollection {
+  id: number;
+  name: string;
+  description: string | null;
+  section_id: number;
+  position: number;
+}
+
 export async function listSnapshots(jwt: string): Promise<FrozenPortfolio[]> {
   return portflowFetch<FrozenPortfolio[]>(jwt, "/api/v1/frozen-portfolios");
 }
@@ -133,4 +170,162 @@ export async function submitSnapshotToCanvas(
     `/api/v1/frozen-portfolios/${encodeURIComponent(snapshotId)}/assessment`,
     { method: "POST" }
   );
+}
+
+export async function listSections(
+  jwt: string,
+  portfolioId: number
+): Promise<PortflowSection[]> {
+  return portflowFetch<PortflowSection[]>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/sections`
+  );
+}
+
+export async function createSection(
+  jwt: string,
+  portfolioId: number,
+  name: string
+): Promise<PortflowSection> {
+  return portflowFetch<PortflowSection>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/sections`,
+    { method: "POST", body: JSON.stringify({ name }) }
+  );
+}
+
+export async function listCollections(
+  jwt: string,
+  portfolioId: number
+): Promise<PortflowCollection[]> {
+  return portflowFetch<PortflowCollection[]>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/collections`
+  );
+}
+
+export async function createCollection(
+  jwt: string,
+  portfolioId: number,
+  name: string,
+  sectionId: number
+): Promise<PortflowCollection> {
+  return portflowFetch<PortflowCollection>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/collections`,
+    { method: "POST", body: JSON.stringify({ name, section_id: sectionId }) }
+  );
+}
+
+export async function updateCollection(
+  jwt: string,
+  portfolioId: number,
+  collectionId: number,
+  fields: { name?: string; description?: string; subtitle?: string; color?: string }
+): Promise<void> {
+  await portflowFetch<null>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/collections/${collectionId}`,
+    { method: "PATCH", body: JSON.stringify(fields) }
+  );
+}
+
+export async function getCollectionById(
+  jwt: string,
+  portfolioId: number,
+  collectionId: number
+): Promise<PortflowCollection & { description?: string; subtitle?: string; evidence_count?: number }> {
+  const all = await portflowFetch<PortflowCollection[]>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/collections`
+  );
+  const found = (all as Array<PortflowCollection & { description?: string; subtitle?: string; evidence_count?: number }>)
+    .find((c) => c.id === collectionId);
+  if (!found) {
+    throw new CanvasApiError(404, `Collectie ${collectionId} niet gevonden in portfolio ${portfolioId}.`);
+  }
+  return found;
+}
+
+export interface PortflowGoal {
+  id: number;
+  name: string;
+  nickname: string;
+  type: "repository" | "portfolio";
+  status: string;
+  explanation: string | null;
+  sub_goals_count: number;
+  evidence_count: number;
+  collections_count: number;
+}
+
+export async function listGoals(jwt: string, portfolioId: number): Promise<PortflowGoal[]> {
+  return portflowFetch<PortflowGoal[]>(jwt, `/api/v1/portfolios/${portfolioId}/goals`);
+}
+
+export async function createFreeTextEvidence(
+  jwt: string,
+  portfolioId: number,
+  name: string,
+  content: string,
+  options: {
+    collectionIds?: number[];
+    goalIds?: number[];
+    goalJustification?: string;
+  } = {}
+): Promise<PortflowEvidence> {
+  const { collectionIds = [], goalIds = [], goalJustification } = options;
+
+  const evidence = await portflowFetch<PortflowEvidence>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/evidence`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        version_type: "free_text",
+        free_text: content,
+        ...(goalIds.length > 0 ? { goal_ids: goalIds } : {}),
+      }),
+    }
+  );
+
+  if (collectionIds.length > 0) {
+    await portflowFetch<null>(
+      jwt,
+      `/api/v1/portfolios/${portfolioId}/evidence/${evidence.id}/link-to-collections`,
+      { method: "POST", body: JSON.stringify({ collection_ids: collectionIds }) }
+    );
+  }
+
+  // Koppel evidence aan goal binnen de collection-context met justification
+  if (goalIds.length > 0 && collectionIds.length > 0 && goalJustification) {
+    for (const colId of collectionIds) {
+      for (const goalId of goalIds) {
+        await portflowFetch<null>(
+          jwt,
+          `/api/v1/portfolios/${portfolioId}/collections/${colId}/goals/${goalId}/evidence`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              evidence_ids: [evidence.id],
+              justification: goalJustification,
+            }),
+          }
+        );
+      }
+    }
+  }
+
+  return evidence;
+}
+
+export async function getPortfolioId(jwt: string): Promise<number> {
+  // Portfolio ID ophalen via de huidige gebruiker
+  const user = await portflowFetch<{ portfolio?: { id: number } }>(
+    jwt,
+    "/api/v1/users/current"
+  );
+  if (user.portfolio?.id) return user.portfolio.id;
+  throw new CanvasApiError(404, "Portflow portfolio ID niet gevonden.");
 }

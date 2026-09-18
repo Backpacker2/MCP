@@ -161,6 +161,20 @@ onomkeerbare write-actie die zonder bevestiging uitgevoerd kon worden. De
 combinatie van "ongefilterde tekst van derden" en "onomkeerbare actie" is
 precies waar prompt-injectie van theorie naar schade gaat.
 
+> **Hoe dit in de praktijk misging.** Tijdens dit onderzoek kwamen er op `main`
+> twee nieuwe schrijf-tools bij: `portflow_add_evidence` en
+> `portflow_update_collection`. Ze waren geschreven zonder kennis van de
+> kill-switch en stonden er dus volledig buiten — `add_evidence` maakt zelfs
+> ontbrekende secties en collecties aan. Bij het samenvoegen viel dat niet op,
+> want Git voegde de bestanden zonder conflict samen: de code paste prima, de
+> beveiliging klopte alleen niet meer.
+>
+> Dat is het echte risico bij een kill-switch die per handler wordt
+> overgeschreven. De controle zit nu daarom in één gedeelde functie
+> (`weigerAlsReadOnly`), en `tests/writeGuard.test.ts` leidt de lijst
+> schrijf-tools af uit de tool-definities zelf. Een nieuwe schrijf-tool die de
+> controle vergeet, laat die test falen.
+
 *Wat er is gedaan — drie lagen, omdat geen enkele laag op zichzelf voldoende is:*
 
 1. **Write-acties staan standaard uit.** `CANVAS_ALLOW_WRITES` moet expliciet op
