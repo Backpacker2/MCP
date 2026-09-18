@@ -7,39 +7,37 @@
  * 3. POST Portflow /lti/open_id → Canvas authorize redirect + Portflow cookie
  * 4. GET Canvas authorize URL (met Canvas cookies) → HTML met id_token
  * 5. POST id_token naar Portflow /lti/launches → HTML met data-session JWT
- * 6. Extract JWT → cachen voor 7u (JWT loopt na 8u af)
+ * 6. Extract JWT → cachen tot vlak voor de vervaldatum uit het token zelf
+ *
+ * Beveiliging: elke URL in deze flow wordt aangedragen door een server
+ * (launch URL door Canvas, authorize URL door Portflow). Die URL's worden
+ * daarom stuk voor stuk gevalideerd tegen een vaste lijst van vertrouwde
+ * hosts voordat er cookies of tokens naartoe gaan. Zie ./http.ts.
  */
 
 import { CanvasClient } from "../canvasClient.js";
+import { logLine } from "../utils/redact.js";
 import { CanvasApiError } from "../errors.js";
+import {
+  HostScopedCookieJar,
+  PORTFLOW_BASE,
+  PORTFLOW_HOST,
+  assertAllowedUrl,
+  safeFetch,
+} from "./http.js";
 
 interface CachedSession {
   jwt: string;
   expiresAt: number;
 }
 
-// Cache per courseId — JWT duurt 8u, we vernieuwen na 7u
+// Cache per courseId. De levensduur komt uit het JWT zelf, niet uit een aanname.
 const sessionCache = new Map<string, CachedSession>();
 
-class CookieJar {
-  private cookies = new Map<string, string>();
-
-  update(headers: Headers): void {
-    const setCookies = headers.getSetCookie?.() ?? [];
-    for (const raw of setCookies) {
-      const [nameValue] = raw.split(";");
-      const eqIdx = nameValue.indexOf("=");
-      if (eqIdx < 0) continue;
-      const name = nameValue.slice(0, eqIdx).trim();
-      const value = nameValue.slice(eqIdx + 1).trim();
-      if (name) this.cookies.set(name, value);
-    }
-  }
-
-  header(): string {
-    return [...this.cookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-  }
-}
+/** Vernieuw ruim voor het verlopen, zodat een lopend verzoek niet halverwege ongeldig wordt. */
+const REFRESH_MARGIN_MS = 5 * 60 * 1000;
+/** Val hierop terug als het JWT geen leesbare exp-claim heeft. Bewust kort. */
+const FALLBACK_TTL_MS = 60 * 60 * 1000;
 
 function extractInputFields(html: string): Record<string, string> {
   const fields: Record<string, string> = {};
@@ -56,41 +54,46 @@ function extractDataSession(html: string): string | null {
   return m ? m[1] : null;
 }
 
-async function fetchText(
-  url: string,
-  options: RequestInit = {},
-  cookieJar?: CookieJar
-): Promise<{ text: string; headers: Headers; finalUrl: string }> {
-  const headers: Record<string, string> = {
-    ...(options.headers as Record<string, string> | undefined),
-  };
-  if (cookieJar) {
-    const cookieHeader = cookieJar.header();
-    if (cookieHeader) headers["Cookie"] = cookieHeader;
+/**
+ * Leest de exp-claim uit een JWT om te bepalen hoelang we mogen cachen.
+ *
+ * We verifiëren de handtekening niet — dat is aan Portflow. We lezen alleen de
+ * vervaldatum, zodat we geen token blijven gebruiken dat allang ongeldig is.
+ * Bij twijfel kiezen we de korte fallback: liever te vaak vernieuwen dan een
+ * dood token hergebruiken.
+ */
+export function jwtExpiryMs(jwt: string, now: number = Date.now()): number {
+  const parts = jwt.split(".");
+  if (parts.length !== 3) return now + FALLBACK_TTL_MS;
+
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf-8")
+    ) as { exp?: unknown };
+
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) {
+      return now + FALLBACK_TTL_MS;
+    }
+
+    const expMs = payload.exp * 1000;
+    // Een exp in het verleden of absurd ver weg vertrouwen we niet.
+    if (expMs <= now || expMs > now + 24 * 60 * 60 * 1000) {
+      return now + FALLBACK_TTL_MS;
+    }
+    return expMs;
+  } catch {
+    return now + FALLBACK_TTL_MS;
   }
-
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    redirect: "manual",
-  });
-
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get("location");
-    if (!location) throw new Error(`Redirect zonder Location header van ${url}`);
-    cookieJar?.update(response.headers);
-    return fetchText(location, { method: "GET" }, cookieJar);
-  }
-
-  cookieJar?.update(response.headers);
-  const text = await response.text();
-  return { text, headers: response.headers, finalUrl: url };
 }
 
 async function getPortflowJwtInternal(
   client: CanvasClient,
   courseId: string
 ): Promise<string> {
+  // Alleen deze twee hosts mogen cookies of tokens ontvangen in deze flow.
+  const canvasHost = new URL(client.baseUrl).hostname;
+  const allowedHosts = [canvasHost, PORTFLOW_HOST] as const;
+
   // Stap 1: haal sessionless launch URL op via Canvas API
   const launchData = await client.get<{ url?: string; errors?: unknown }>(
     `/api/v1/courses/${courseId}/external_tools/sessionless_launch`,
@@ -104,75 +107,94 @@ async function getPortflowJwtInternal(
     );
   }
 
-  const canvasCookies = new CookieJar();
-  const portflowCookies = new CookieJar();
+  // De launch URL bevat een session_token: die mag alleen naar Canvas zelf.
+  assertAllowedUrl(launchData.url, [canvasHost], "Canvas launch-URL");
 
-  // Stap 2: laad de Canvas LTI pagina (met session_token) → HTML + cookies
-  const { text: canvasHtml } = await fetchText(launchData.url, {}, canvasCookies);
+  const cookieJar = new HostScopedCookieJar();
 
-  const ltiFields = extractInputFields(canvasHtml);
-  if (!ltiFields["lti_message_hint"]) {
-    throw new Error("Kon LTI form parameters niet extracten uit Canvas pagina.");
-  }
+  try {
+    // Stap 2: laad de Canvas LTI pagina (met session_token) → HTML + cookies
+    const { text: canvasHtml } = await safeFetch(launchData.url, {
+      cookieJar,
+      allowedHosts,
+      context: "Canvas LTI-launchpagina",
+    });
 
-  // Stap 3: POST naar Portflow /lti/open_id → Canvas authorize redirect
-  const portflowOpenIdBody = new URLSearchParams(ltiFields);
-  const openIdResponse = await fetch("https://portfolio.drieam.app/lti/open_id", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: portflowOpenIdBody.toString(),
-    redirect: "manual",
-  });
+    const ltiFields = extractInputFields(canvasHtml);
+    if (!ltiFields["lti_message_hint"]) {
+      throw new CanvasApiError(
+        0,
+        "Kon LTI form parameters niet extracten uit Canvas pagina."
+      );
+    }
 
-  portflowCookies.update(openIdResponse.headers);
-  const canvasAuthorizeUrl = openIdResponse.headers.get("location");
-  if (!canvasAuthorizeUrl) {
-    throw new Error("Portflow /lti/open_id gaf geen redirect terug.");
-  }
-
-  // Stap 4: GET Canvas authorize URL (met Canvas cookies) → HTML met id_token
-  const { text: authorizeHtml } = await fetchText(
-    canvasAuthorizeUrl,
-    {},
-    canvasCookies
-  );
-
-  const tokenFields = extractInputFields(authorizeHtml);
-  if (!tokenFields["id_token"]) {
-    throw new Error(
-      "Kon geen id_token vinden in Canvas authorize response. Mogelijk is de sessie verlopen."
+    // Stap 3: POST naar Portflow /lti/open_id → Canvas authorize redirect
+    const { headers: openIdHeaders } = await safeFetch(
+      `${PORTFLOW_BASE}/lti/open_id`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(ltiFields).toString(),
+        cookieJar,
+        allowedHosts,
+        followRedirects: false,
+        context: "Portflow open_id",
+      }
     );
+
+    const canvasAuthorizeUrl = openIdHeaders.get("location");
+    if (!canvasAuthorizeUrl) {
+      throw new CanvasApiError(0, "Portflow /lti/open_id gaf geen redirect terug.");
+    }
+
+    // Deze URL komt van Portflow maar krijgt Canvas-cookies mee: streng valideren.
+    assertAllowedUrl(canvasAuthorizeUrl, [canvasHost], "Canvas authorize-URL");
+
+    // Stap 4: GET Canvas authorize URL (met Canvas cookies) → HTML met id_token
+    const { text: authorizeHtml } = await safeFetch(canvasAuthorizeUrl, {
+      cookieJar,
+      allowedHosts,
+      context: "Canvas authorize",
+    });
+
+    const tokenFields = extractInputFields(authorizeHtml);
+    if (!tokenFields["id_token"]) {
+      throw new CanvasApiError(
+        0,
+        "Kon geen id_token vinden in Canvas authorize response. Mogelijk is de sessie verlopen."
+      );
+    }
+
+    // Stap 5: POST id_token naar Portflow /lti/launches → HTML met data-session JWT
+    const launchBody = new URLSearchParams({
+      id_token: tokenFields["id_token"],
+      state: tokenFields["state"] ?? "",
+      lti_storage_target: tokenFields["lti_storage_target"] ?? "",
+    });
+
+    const { text: launchHtml } = await safeFetch(`${PORTFLOW_BASE}/lti/launches`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: launchBody.toString(),
+      cookieJar,
+      allowedHosts,
+      followRedirects: false,
+      context: "Portflow launch",
+    });
+
+    const jwt = extractDataSession(launchHtml);
+    if (!jwt) {
+      throw new CanvasApiError(
+        0,
+        "Kon geen Portflow sessie JWT vinden. De LTI launch is mislukt."
+      );
+    }
+
+    return jwt;
+  } finally {
+    // Sessiecookies niet langer in het geheugen houden dan nodig.
+    cookieJar.clear();
   }
-
-  // Stap 5: POST id_token naar Portflow /lti/launches → HTML met data-session JWT
-  const launchBody = new URLSearchParams({
-    id_token: tokenFields["id_token"],
-    state: tokenFields["state"] ?? "",
-    lti_storage_target: tokenFields["lti_storage_target"] ?? "",
-  });
-
-  const launchResponse = await fetch("https://portfolio.drieam.app/lti/launches", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Cookie: portflowCookies.header(),
-    },
-    body: launchBody.toString(),
-    redirect: "manual",
-  });
-
-  const launchHtml = await launchResponse.text();
-  const jwt = extractDataSession(launchHtml);
-
-  if (!jwt) {
-    throw new Error(
-      "Kon geen Portflow sessie JWT vinden. De LTI launch is mislukt."
-    );
-  }
-
-  return jwt;
 }
 
 export async function getPortflowJwt(
@@ -180,22 +202,26 @@ export async function getPortflowJwt(
   courseId: string
 ): Promise<string> {
   const cached = sessionCache.get(courseId);
-  // Vernieuw 30 minuten voor verlopen (8u - 30min = 7.5u)
-  const refreshThreshold = Date.now() + 30 * 60 * 1000;
-  if (cached && cached.expiresAt > refreshThreshold) {
+  if (cached && cached.expiresAt > Date.now() + REFRESH_MARGIN_MS) {
     return cached.jwt;
   }
 
-  process.stderr.write(`[Portflow] Nieuwe LTI sessie aanvragen voor cursus ${courseId}\n`);
+  logLine(
+    `[Portflow] Nieuwe LTI sessie aanvragen voor cursus ${courseId}\n`
+  );
   const jwt = await getPortflowJwtInternal(client, courseId);
 
-  // JWT verloopt na 8u (28800s)
-  sessionCache.set(courseId, {
-    jwt,
-    expiresAt: Date.now() + 8 * 60 * 60 * 1000,
-  });
+  sessionCache.set(courseId, { jwt, expiresAt: jwtExpiryMs(jwt) });
 
   return jwt;
+}
+
+/**
+ * Gooit de gecachte sessie weg. Aanroepen zodra Portflow 401/403 geeft:
+ * anders blijven we een ongeldig token hergebruiken tot de cache vanzelf verloopt.
+ */
+export function invalidatePortflowSession(courseId: string): void {
+  sessionCache.delete(courseId);
 }
 
 export function clearPortflowCache(): void {

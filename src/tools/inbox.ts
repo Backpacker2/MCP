@@ -3,6 +3,7 @@ import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
+import { untrusted } from "../utils/untrusted.js";
 
 interface CanvasConversation {
   id: number;
@@ -73,7 +74,10 @@ export async function getConversation(
   for (const msg of conv.messages) {
     const date = formatDate(msg.created_at);
     const body = cleanHtml(msg.body);
-    lines.push(`\n[${date}] ${msg.author.name}:\n${body}`);
+    lines.push(
+      `\n[${date}] ${msg.author.name}:\n` +
+        untrusted(`inbox-bericht van ${msg.author.name}`, body)
+    );
   }
 
   return lines.join("\n");

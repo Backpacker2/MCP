@@ -4,11 +4,32 @@ import { CanvasApiError } from "../errors.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
+import { untrusted } from "../utils/untrusted.js";
 
 
 const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
 const listPagesSchema = z.object({ courseId: idParam });
-const getPageContentSchema = z.object({ courseId: idParam, pageUrl: z.string().min(1, "pageUrl mag niet leeg zijn") });
+
+/**
+ * pageUrl is de enige tool-parameter die geen puur getal is en die in een
+ * API-pad terechtkomt. Zonder controle kan een waarde als "../../users/self"
+ * uit het cursuspad breken en een heel ander Canvas-endpoint raken — mét jouw
+ * token. Daarom hier twee lagen: weigeren wat niet op een slug lijkt, en
+ * daarna alsnog percent-encoden.
+ */
+const slugParam = z
+  .string()
+  .min(1, "pageUrl mag niet leeg zijn")
+  .max(255, "pageUrl is te lang")
+  .refine((s) => !/[/\\]/.test(s), "pageUrl mag geen slashes bevatten")
+  .refine((s) => !s.includes(".."), "pageUrl mag geen '..' bevatten")
+  .refine((s) => !/[\u0000-\u001F\u007F]/.test(s), "pageUrl bevat ongeldige tekens");
+
+export function encodeSlug(slug: string): string {
+  return encodeURIComponent(slug);
+}
+
+const getPageContentSchema = z.object({ courseId: idParam, pageUrl: slugParam });
 
 interface CanvasPage {
   url: string;
@@ -113,7 +134,7 @@ export async function getPageContent(
   pageUrl: string
 ): Promise<string> {
   const page = await client.get<CanvasPageDetail>(
-    `/api/v1/courses/${courseId}/pages/${pageUrl}`
+    `/api/v1/courses/${courseId}/pages/${encodeSlug(pageUrl)}`
   );
 
   const updated = formatDate(page.updated_at);
@@ -125,7 +146,7 @@ export async function getPageContent(
     `Bijgewerkt: ${updated}`,
     ``,
     `Inhoud:`,
-    body,
+    untrusted(`Canvas-pagina "${page.title}"`, body),
   ].join("\n");
 }
 

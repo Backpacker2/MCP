@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from "axios";
 import { CanvasApiError, statusCodeToMessage } from "./errors.js";
+import { logLine } from "./utils/redact.js";
 
 export interface CanvasClientOptions {
   baseUrl: string;
@@ -70,7 +71,7 @@ export class CanvasClient {
 
     // Log requests voor debugging — headers worden bewust weggelaten om token te beschermen
     this.http.interceptors.request.use((config) => {
-      process.stderr.write(`[Canvas] ${config.method?.toUpperCase()} ${config.url}\n`);
+      logLine(`[Canvas] ${config.method?.toUpperCase()} ${config.url}\n`);
       return config;
     });
   }

@@ -10,6 +10,8 @@ import { ZodError } from "zod";
 import { loadConfig } from "./config.js";
 import { CanvasClient } from "./canvasClient.js";
 import { CanvasApiError, CanvasConfigError } from "./errors.js";
+import { logLine, safeErrorText } from "./utils/redact.js";
+import { runStartupChecks } from "./startupChecks.js";
 import { courseTools } from "./tools/courses.js";
 import { assignmentTools } from "./tools/assignments.js";
 import { plannerTools } from "./tools/planner.js";
@@ -94,7 +96,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         isError: true,
       };
     }
-    process.stderr.write(`[canvas-claude-mcp] Onverwachte fout in ${name}: ${error}\n`);
+    logLine(`[canvas-claude-mcp] Onverwachte fout in ${name}: ${safeErrorText(error)}\n`);
     return {
       content: [{ type: "text", text: `Er is een onverwachte fout opgetreden bij ${name}. Controleer de server logs.` }],
       isError: true,
@@ -104,11 +106,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 async function main() {
   const transport = new StdioServerTransport();
+  runStartupChecks(config.allowWrites);
   await server.connect(transport);
-  process.stderr.write("[canvas-claude-mcp] Server gestart via stdio.\n");
+  logLine("[canvas-claude-mcp] Server gestart via stdio.\n");
 }
 
 main().catch((error) => {
-  process.stderr.write(`[canvas-claude-mcp] Fatale fout: ${error.message}\n`);
+  logLine(`[canvas-claude-mcp] Fatale fout: ${safeErrorText(error)}\n`);
   process.exit(1);
 });

@@ -3,6 +3,7 @@ import { CanvasClient } from "../canvasClient.js";
 import { fetchAllPages } from "../pagination.js";
 import { cleanHtml } from "../utils/cleanHtml.js";
 import { formatDate } from "../utils/formatDate.js";
+import { untrusted } from "../utils/untrusted.js";
 
 const idParam = z.string().regex(/^\d+$/, "ID mag alleen cijfers bevatten");
 const listDiscussionsSchema = z.object({ courseId: idParam });
@@ -61,7 +62,10 @@ export async function getDiscussionEntries(
   const lines = entries.map((e) => {
     const date = formatDate(e.created_at);
     const message = cleanHtml(e.message) || "(geen tekst)";
-    return `[${date}] ${e.user_name}:\n  ${message}`;
+    return (
+      `[${date}] ${e.user_name}:\n` +
+      untrusted(`discussiebericht van ${e.user_name}`, message)
+    );
   });
 
   return `Berichten in discussie ${topicId} (${entries.length}):\n\n${lines.join("\n\n")}`;

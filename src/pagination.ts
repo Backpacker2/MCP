@@ -11,10 +11,31 @@ function parseNextUrl(linkHeader: string | null): string | null {
   return null;
 }
 
+/**
+ * Een Canvas-lijst kan over heel veel pagina's lopen. Zonder bovengrens haalt
+ * één tool-aanroep in het ergste geval honderdduizenden records op: traag,
+ * geheugenvretend en het levert een antwoord op dat toch niet bruikbaar is.
+ */
+export const MAX_PAGES = 50;
+
 function validatePaginationUrl(nextUrl: string, baseUrl: string): string {
-  const next = new URL(nextUrl);
+  let next: URL;
+  try {
+    next = new URL(nextUrl);
+  } catch {
+    throw new CanvasApiError(
+      0,
+      "Paginering-URL is geen geldige URL — verzoek geweigerd."
+    );
+  }
   const base = new URL(baseUrl);
 
+  if (next.protocol !== base.protocol) {
+    throw new CanvasApiError(
+      0,
+      "Paginering-URL wisselt van protocol — verzoek geweigerd."
+    );
+  }
   if (next.hostname !== base.hostname) {
     throw new CanvasApiError(0, "Paginering-URL wijst naar een onbekende host — verzoek geweigerd.");
   }
@@ -37,7 +58,17 @@ export async function fetchAllPages<T>(
     ...params,
   };
 
+  let pages = 0;
+  const seen = new Set<string>();
+
   while (currentPath) {
+    if (++pages > MAX_PAGES) {
+      process.stderr.write(
+        `[Canvas] Paginalimiet (${MAX_PAGES}) bereikt voor ${path} — resultaat is afgekapt.\n`
+      );
+      break;
+    }
+
     const { data, linkHeader } = await client.getWithHeaders<T[]>(
       currentPath,
       currentParams
@@ -46,7 +77,16 @@ export async function fetchAllPages<T>(
 
     const nextUrl = parseNextUrl(linkHeader);
     if (nextUrl) {
-      currentPath = validatePaginationUrl(nextUrl, client.baseUrl);
+      const nextPath = validatePaginationUrl(nextUrl, client.baseUrl);
+      // Een server die steeds naar dezelfde pagina wijst zou ons eindeloos laten rondlopen.
+      if (seen.has(nextPath)) {
+        process.stderr.write(
+          `[Canvas] Paginering wijst naar een al bezochte pagina — gestopt.\n`
+        );
+        break;
+      }
+      seen.add(nextPath);
+      currentPath = nextPath;
       currentParams = undefined;
     } else {
       currentPath = null;

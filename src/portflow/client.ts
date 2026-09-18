@@ -1,6 +1,10 @@
 import { CanvasApiError } from "../errors.js";
-
-const PORTFLOW_BASE = "https://portfolio.drieam.app";
+import { logLine } from "../utils/redact.js";
+import {
+  FETCH_TIMEOUT_MS,
+  MAX_RESPONSE_BYTES,
+  PORTFLOW_BASE,
+} from "./http.js";
 
 interface PortflowError {
   code?: number;
@@ -16,19 +20,49 @@ async function portflowFetch<T>(
   const url = `${PORTFLOW_BASE}${path}`;
   const method = (options.method ?? "GET").toUpperCase();
 
-  process.stderr.write(`[Portflow] ${method} ${path}\n`);
+  // Alleen methode en pad loggen — nooit het JWT of de headers.
+  logLine(`[Portflow] ${method} ${path}\n`);
 
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(options.headers as Record<string, string> | undefined),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(options.headers as Record<string, string> | undefined),
+      },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new CanvasApiError(
+        0,
+        `Portflow reageerde niet binnen ${FETCH_TIMEOUT_MS / 1000} seconden.`
+      );
+    }
+    throw new CanvasApiError(
+      0,
+      `Netwerkfout bij Portflow: ${err instanceof Error ? err.message : "onbekend"}`
+    );
+  }
+
+  const declared = response.headers.get("content-length");
+  if (declared && Number(declared) > MAX_RESPONSE_BYTES) {
+    throw new CanvasApiError(
+      response.status,
+      `Antwoord van Portflow is te groot (${declared} bytes).`
+    );
+  }
 
   const text = await response.text();
+  if (text.length > MAX_RESPONSE_BYTES) {
+    throw new CanvasApiError(
+      response.status,
+      `Antwoord van Portflow overschrijdt de limiet van ${MAX_RESPONSE_BYTES} bytes.`
+    );
+  }
 
   let data: unknown;
   try {
@@ -42,8 +76,7 @@ async function portflowFetch<T>(
 
   if (!response.ok) {
     const err = data as PortflowError;
-    const msg =
-      err?.message ?? `Portflow API fout (status ${response.status}).`;
+    const msg = err?.message ?? `Portflow API fout (status ${response.status}).`;
     throw new CanvasApiError(response.status, `Portflow: ${msg}`);
   }
 
