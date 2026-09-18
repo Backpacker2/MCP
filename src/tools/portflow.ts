@@ -11,6 +11,7 @@ import {
   createCollection,
   updateCollection,
   createFreeTextEvidence,
+  listGoals,
   getPortfolioId,
 } from "../portflow/client.js";
 import { formatDate } from "../utils/formatDate.js";
@@ -156,6 +157,28 @@ async function handleUpdateCollection(
   return `Collectie "${collection.name}" (ID: ${collection.id}) bijgewerkt. Gewijzigde velden: ${updated}.`;
 }
 
+const listGoalsSchema = z.object({ courseId: courseIdParam, portfolioId: z.string().regex(/^\d+$/).optional() });
+
+async function handleListGoals(client: CanvasClient, args: Record<string, string>): Promise<string> {
+  const { courseId, portfolioId: portfolioIdStr } = listGoalsSchema.parse(args);
+  const jwt = await getPortflowJwt(client, courseId);
+  const portfolioId = portfolioIdStr ? parseInt(portfolioIdStr, 10) : await getPortfolioId(jwt);
+  const goals = await listGoals(jwt, portfolioId);
+
+  if (goals.length === 0) return "Geen goals gevonden in dit portfolio.";
+
+  const repoGoals = goals.filter((g) => g.type === "repository");
+  const portGoals = goals.filter((g) => g.type === "portfolio");
+
+  const fmt = (gs: typeof goals) =>
+    gs.map((g) => `  [${g.id}] ${g.name} — ${g.evidence_count} bewijs, ${g.sub_goals_count} sub-goals`).join("\n");
+
+  const parts: string[] = [];
+  if (repoGoals.length > 0) parts.push(`**Competenties (dit semester):**\n${fmt(repoGoals)}`);
+  if (portGoals.length > 0) parts.push(`**Portfolio goals (vorige semesters):**\n${fmt(portGoals)}`);
+  return parts.join("\n\n");
+}
+
 const addEvidenceSchema = z.object({
   courseId: courseIdParam,
   portfolioId: z.string().regex(/^\d+$/, "portfolioId mag alleen cijfers bevatten").optional(),
@@ -163,13 +186,24 @@ const addEvidenceSchema = z.object({
   content: z.string().min(1, "Inhoud is verplicht"),
   sectionName: z.string().optional(),
   collectionName: z.string().optional(),
+  goalIds: z.string().optional(),
+  goalJustification: z.string().optional(),
 });
 
 async function handleAddEvidence(
   client: CanvasClient,
   args: Record<string, string>
 ): Promise<string> {
-  const { courseId, portfolioId: portfolioIdStr, name, content, sectionName, collectionName } = addEvidenceSchema.parse(args);
+  const {
+    courseId,
+    portfolioId: portfolioIdStr,
+    name,
+    content,
+    sectionName,
+    collectionName,
+    goalIds: goalIdsStr,
+    goalJustification,
+  } = addEvidenceSchema.parse(args);
   const jwt = await getPortflowJwt(client, courseId);
 
   let portfolioId: number;
@@ -179,12 +213,21 @@ async function handleAddEvidence(
     portfolioId = await getPortfolioId(jwt);
   }
 
+  // Verwerk comma-separated goalIds
+  const goalIds: number[] =
+    goalIdsStr
+      ?.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter((n) => !isNaN(n)) ?? [];
+
   let collectionIds: number[] = [];
 
   if (sectionName || collectionName) {
     const sections = await listSections(jwt, portfolioId);
 
-    let sectionId: number;
+    let sectionId!: number;
     if (sectionName) {
       const existing = sections.find(
         (s) => s.name.toLowerCase() === sectionName.toLowerCase()
@@ -202,7 +245,9 @@ async function handleAddEvidence(
     if (collectionName && sectionId) {
       const collections = await listCollections(jwt, portfolioId);
       const existingCol = collections.find(
-        (c) => c.name.toLowerCase() === collectionName.toLowerCase() && c.section_id === sectionId
+        (c) =>
+          c.name.toLowerCase() === collectionName.toLowerCase() &&
+          c.section_id === sectionId
       );
       if (existingCol) {
         collectionIds = [existingCol.id];
@@ -213,13 +258,41 @@ async function handleAddEvidence(
     }
   }
 
-  const evidence = await createFreeTextEvidence(jwt, portfolioId, name, content, collectionIds);
+  const evidence = await createFreeTextEvidence(jwt, portfolioId, name, content, {
+    collectionIds,
+    goalIds,
+    goalJustification,
+  });
 
-  const linked = collectionIds.length > 0 ? ` en gekoppeld aan ${collectionIds.length} collectie(s)` : "";
-  return `Bewijs "${evidence.name}" (ID: ${evidence.id}) aangemaakt in portfolio${linked}.\nType: ${evidence.latest_version_type} | Aangemaakt: ${evidence.created_at}`;
+  const parts: string[] = [
+    `Bewijs "${evidence.name}" (ID: ${evidence.id}) aangemaakt.`,
+    `Type: ${evidence.latest_version_type} | Aangemaakt: ${evidence.created_at}`,
+  ];
+  if (collectionIds.length > 0)
+    parts.push(`Gekoppeld aan ${collectionIds.length} collectie(s).`);
+  if (goalIds.length > 0)
+    parts.push(
+      `Gelinkt aan ${goalIds.length} goal(s)${goalJustification ? " met justification" : ""}.`
+    );
+  return parts.join("\n");
 }
 
 export const portflowTools = [
+  {
+    name: "portflow_list_goals",
+    description:
+      "Haal alle Portflow goals (competenties) op voor het portfolio. Geeft ID, naam en het aantal gekoppelde bewijzen. Gebruik de IDs bij portflow_add_evidence om bewijs aan goals te koppelen.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        courseId: { type: "string", description: "Canvas cursus-ID (bijv. 15807)." },
+        portfolioId: { type: "string", description: "Optioneel: portfolio ID." },
+      },
+      required: ["courseId"],
+    },
+    schema: listGoalsSchema,
+    handler: handleListGoals,
+  },
   {
     name: "portflow_list_snapshots",
     description:
@@ -311,6 +384,14 @@ export const portflowTools = [
         collectionName: {
           type: "string",
           description: "Optioneel: naam van de collectie binnen de sectie. Wordt aangemaakt als niet bestaat.",
+        },
+        goalIds: {
+          type: "string",
+          description: "Optioneel: comma-separated lijst van goal-IDs om het bewijs aan te koppelen (bijv. '471123,471120'). Gebruik portflow_list_goals voor de beschikbare IDs.",
+        },
+        goalJustification: {
+          type: "string",
+          description: "Optioneel: motivatie waarom dit bewijs bijdraagt aan de opgegeven goals. Wordt opgeslagen bij de goal-koppeling. Vereist dat ook collectionName en goalIds zijn opgegeven.",
         },
       },
       required: ["courseId", "name", "content"],

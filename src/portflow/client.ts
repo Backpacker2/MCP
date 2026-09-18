@@ -214,13 +214,35 @@ export async function getCollectionById(
   return found;
 }
 
+export interface PortflowGoal {
+  id: number;
+  name: string;
+  nickname: string;
+  type: "repository" | "portfolio";
+  status: string;
+  explanation: string | null;
+  sub_goals_count: number;
+  evidence_count: number;
+  collections_count: number;
+}
+
+export async function listGoals(jwt: string, portfolioId: number): Promise<PortflowGoal[]> {
+  return portflowFetch<PortflowGoal[]>(jwt, `/api/v1/portfolios/${portfolioId}/goals`);
+}
+
 export async function createFreeTextEvidence(
   jwt: string,
   portfolioId: number,
   name: string,
   content: string,
-  collectionIds: number[] = []
+  options: {
+    collectionIds?: number[];
+    goalIds?: number[];
+    goalJustification?: string;
+  } = {}
 ): Promise<PortflowEvidence> {
+  const { collectionIds = [], goalIds = [], goalJustification } = options;
+
   const evidence = await portflowFetch<PortflowEvidence>(
     jwt,
     `/api/v1/portfolios/${portfolioId}/evidence`,
@@ -230,19 +252,36 @@ export async function createFreeTextEvidence(
         name,
         version_type: "free_text",
         free_text: content,
+        ...(goalIds.length > 0 ? { goal_ids: goalIds } : {}),
       }),
     }
   );
 
   if (collectionIds.length > 0) {
-    await portflowFetch<unknown>(
+    await portflowFetch<null>(
       jwt,
       `/api/v1/portfolios/${portfolioId}/evidence/${evidence.id}/link-to-collections`,
-      {
-        method: "POST",
-        body: JSON.stringify({ collection_ids: collectionIds }),
-      }
+      { method: "POST", body: JSON.stringify({ collection_ids: collectionIds }) }
     );
+  }
+
+  // Koppel evidence aan goal binnen de collection-context met justification
+  if (goalIds.length > 0 && collectionIds.length > 0 && goalJustification) {
+    for (const colId of collectionIds) {
+      for (const goalId of goalIds) {
+        await portflowFetch<null>(
+          jwt,
+          `/api/v1/portfolios/${portfolioId}/collections/${colId}/goals/${goalId}/evidence`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              evidence_ids: [evidence.id],
+              justification: goalJustification,
+            }),
+          }
+        );
+      }
+    }
   }
 
   return evidence;
