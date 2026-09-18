@@ -9,6 +9,7 @@ import {
   createSection,
   listCollections,
   createCollection,
+  updateCollection,
   createFreeTextEvidence,
   getPortfolioId,
 } from "../portflow/client.js";
@@ -99,6 +100,60 @@ async function handleSubmitSnapshot(
   await submitSnapshotToCanvas(jwt, snapshotId);
 
   return `Snapshot ${snapshotId} succesvol ingeleverd bij de Canvas opdracht in cursus ${courseId}.`;
+}
+
+const updateCollectionSchema = z.object({
+  courseId: courseIdParam,
+  portfolioId: z.string().regex(/^\d+$/).optional(),
+  sectionName: z.string().min(1),
+  collectionName: z.string().min(1),
+  description: z.string().optional(),
+  subtitle: z.string().optional(),
+  color: z.string().optional(),
+});
+
+async function handleUpdateCollection(
+  client: CanvasClient,
+  args: Record<string, string>
+): Promise<string> {
+  const { courseId, portfolioId: portfolioIdStr, sectionName, collectionName, description, subtitle, color } =
+    updateCollectionSchema.parse(args);
+  const jwt = await getPortflowJwt(client, courseId);
+
+  let portfolioId: number;
+  if (portfolioIdStr) {
+    portfolioId = parseInt(portfolioIdStr, 10);
+  } else {
+    portfolioId = await getPortfolioId(jwt);
+  }
+
+  const sections = await listSections(jwt, portfolioId);
+  const section = sections.find((s) => s.name.toLowerCase() === sectionName.toLowerCase());
+  if (!section) {
+    return `Sectie "${sectionName}" niet gevonden. Beschikbare secties: ${sections.map((s) => s.name).join(", ")}`;
+  }
+
+  const collections = await listCollections(jwt, portfolioId);
+  const collection = collections.find(
+    (c) => c.name.toLowerCase() === collectionName.toLowerCase() && c.section_id === section.id
+  );
+  if (!collection) {
+    return `Collectie "${collectionName}" niet gevonden in sectie "${sectionName}".`;
+  }
+
+  const updates: Record<string, string> = {};
+  if (description !== undefined) updates.description = description;
+  if (subtitle !== undefined) updates.subtitle = subtitle;
+  if (color !== undefined) updates.color = color;
+
+  if (Object.keys(updates).length === 0) {
+    return "Geen velden opgegeven om bij te werken (description, subtitle of color).";
+  }
+
+  await updateCollection(jwt, portfolioId, collection.id, updates);
+
+  const updated = Object.keys(updates).join(", ");
+  return `Collectie "${collection.name}" (ID: ${collection.id}) bijgewerkt. Gewijzigde velden: ${updated}.`;
 }
 
 const addEvidenceSchema = z.object({
@@ -262,5 +317,46 @@ export const portflowTools = [
     },
     schema: addEvidenceSchema,
     handler: handleAddEvidence,
+  },
+  {
+    name: "portflow_update_collection",
+    description:
+      "Werk de beschrijving, ondertitel of kleur van een bestaande Portflow collectie bij. Zoekt de collectie op via secties- en collectienaam. Gebruik dit om de collection description te schrijven.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        courseId: {
+          type: "string",
+          description: "Canvas cursus-ID om de Portflow sessie te starten (bijv. 15807).",
+        },
+        portfolioId: {
+          type: "string",
+          description: "Optioneel: het numerieke ID van het portfolio.",
+        },
+        sectionName: {
+          type: "string",
+          description: "Naam van de sectie waarin de collectie staat (bijv. 'Open Learning FT Semester 3 – Fall 26').",
+        },
+        collectionName: {
+          type: "string",
+          description: "Naam van de collectie die bijgewerkt moet worden (bijv. 'Personal project').",
+        },
+        description: {
+          type: "string",
+          description: "Nieuwe HTML-beschrijving voor de collectie.",
+        },
+        subtitle: {
+          type: "string",
+          description: "Nieuwe ondertitel voor de collectie (korte tekst, plain text).",
+        },
+        color: {
+          type: "string",
+          description: "Nieuwe kleur als hex-code (bijv. '#cddc39').",
+        },
+      },
+      required: ["courseId", "sectionName", "collectionName"],
+    },
+    schema: updateCollectionSchema,
+    handler: handleUpdateCollection,
   },
 ];

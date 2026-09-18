@@ -12,6 +12,7 @@
 - [x] ~~**`canvas_get_assignment_groups`**~~ ✅
 
 - [x] ~~**Portflow MCP tools implementeren**~~ (17 sep 2026) — `portflow_list_snapshots`, `portflow_get_snapshot`, `portflow_submit_snapshot` + LTI auth module + Portflow API client
+- [x] ~~**Portflow write-tools toevoegen**~~ (18 sep 2026) — `portflow_add_evidence` (bewijs aanmaken + koppelen), `portflow_update_collection` (description/subtitle/color bijwerken via sectie+collectienaam), PATCH/204-fix in client
 
 ## Waiting On
 

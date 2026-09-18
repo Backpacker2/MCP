@@ -184,6 +184,36 @@ export async function createCollection(
   );
 }
 
+export async function updateCollection(
+  jwt: string,
+  portfolioId: number,
+  collectionId: number,
+  fields: { name?: string; description?: string; subtitle?: string; color?: string }
+): Promise<void> {
+  await portflowFetch<null>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/collections/${collectionId}`,
+    { method: "PATCH", body: JSON.stringify(fields) }
+  );
+}
+
+export async function getCollectionById(
+  jwt: string,
+  portfolioId: number,
+  collectionId: number
+): Promise<PortflowCollection & { description?: string; subtitle?: string; evidence_count?: number }> {
+  const all = await portflowFetch<PortflowCollection[]>(
+    jwt,
+    `/api/v1/portfolios/${portfolioId}/collections`
+  );
+  const found = (all as Array<PortflowCollection & { description?: string; subtitle?: string; evidence_count?: number }>)
+    .find((c) => c.id === collectionId);
+  if (!found) {
+    throw new CanvasApiError(404, `Collectie ${collectionId} niet gevonden in portfolio ${portfolioId}.`);
+  }
+  return found;
+}
+
 export async function createFreeTextEvidence(
   jwt: string,
   portfolioId: number,
